@@ -53,6 +53,7 @@ const roundOf32Slots = [
 const $ = (selector) => document.querySelector(selector);
 const root = $('#view-root');
 const statusStrip = $('#status-strip');
+const statusText = $('#status-text');
 
 function savedKey() { return localStorage.getItem(KEY_STORAGE) || ''; }
 function saveKey(value) { localStorage.setItem(KEY_STORAGE, value || ''); }
@@ -224,7 +225,7 @@ function invalidateViewCache(pathPrefix) {
 
 function setStatus(text, strong = '') {
   const updated = state.lastUpdatedAt ? ` · actualizado ${timeLabel(state.lastUpdatedAt.toISOString())}` : '';
-  statusStrip.innerHTML = strong
+  statusText.innerHTML = strong
     ? `<span>${escapeHtml(text)}${updated}</span><strong>${escapeHtml(strong)}</strong>`
     : `<span>${escapeHtml(text)}${updated}</span>`;
 }
@@ -382,6 +383,42 @@ function renderDateToolbar() {
     </div>`;
 }
 
+function adjacentDateMode(direction) {
+  const modes = dateModes.map(([mode]) => mode);
+  const current = modes.indexOf(state.dateMode);
+  if (current < 0) return null;
+  const next = current + direction;
+  return modes[next] || null;
+}
+
+function attachDaySwipe(container) {
+  let startX = 0;
+  let startY = 0;
+  let startedAt = 0;
+  container.addEventListener('touchstart', (event) => {
+    if (event.target.closest('.segment, button, a, .modal-overlay')) return;
+    const touch = event.changedTouches[0];
+    startX = touch.clientX;
+    startY = touch.clientY;
+    startedAt = Date.now();
+  }, { passive: true });
+  container.addEventListener('touchend', (event) => {
+    if (!startedAt) return;
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    const elapsed = Date.now() - startedAt;
+    startedAt = 0;
+    if (Math.abs(deltaX) < 56 || Math.abs(deltaX) < Math.abs(deltaY) * 1.35 || elapsed > 650) return;
+    const nextMode = adjacentDateMode(deltaX < 0 ? 1 : -1);
+    if (!nextMode) return;
+    state.dateMode = nextMode;
+    invalidateViewCache('web/matches');
+    container.classList.add(deltaX < 0 ? 'swipe-left' : 'swipe-right');
+    window.setTimeout(() => renderToday(), 80);
+  }, { passive: true });
+}
+
 async function renderToday(options = {}) {
   if (!options.silent) loading('Partidos');
   const data = await cached('web/matches', todayParams(), 30000, options);
@@ -397,7 +434,7 @@ async function renderToday(options = {}) {
       <h2 class="section-title">${escapeHtml(state.dateMode === 'today' ? `Próximos hoy · ${label}` : label)}</h2>
       <div class="grid">${grouped[label].map(matchCard).join('')}</div>
     </section>`).join('') || emptyState('No hay partidos para este rango.');
-  root.innerHTML = `${renderDateToolbar()}${content}`;
+  root.innerHTML = `<div class="today-view">${renderDateToolbar()}<div class="day-content fade-in">${content}</div></div>`;
   root.querySelectorAll('[data-date-mode]').forEach((button) => {
     button.addEventListener('click', () => {
       if (state.dateMode === button.dataset.dateMode) return;
@@ -406,6 +443,8 @@ async function renderToday(options = {}) {
       renderToday();
     });
   });
+  const todayView = root.querySelector('.today-view');
+  if (todayView) attachDaySwipe(todayView);
 }
 
 async function renderStandings(options = {}) {

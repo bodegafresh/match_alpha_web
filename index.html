@@ -25,11 +25,13 @@
       <button class="tab" data-view="teams">Equipos</button>
       <button class="tab" data-view="knockout">Eliminatorias</button>
     </nav>
-    <button id="refresh-btn" class="icon-btn" type="button" title="Actualizar" aria-label="Actualizar">↻</button>
   </header>
 
   <main class="shell">
-    <section id="status-strip" class="status-strip"></section>
+    <section id="status-strip" class="status-strip">
+      <span id="status-text"></span>
+      <button id="refresh-btn" class="icon-btn" type="button" title="Actualizar" aria-label="Actualizar">↻</button>
+    </section>
     <section id="view-root" class="view-root"></section>
   </main>
 
