@@ -371,6 +371,28 @@ function todayParams() {
   return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
 }
 
+function matchesOverviewParams() {
+  const now = new Date();
+  const yesterday = chileOperationalRange(now, -1);
+  const today = chileOperationalRange(now, 0);
+  const tomorrow = chileOperationalRange(now, 1);
+  return {
+    yesterday_from: yesterday.kickoff_from,
+    yesterday_to: yesterday.kickoff_to,
+    today_from: today.kickoff_from,
+    today_to: today.kickoff_to,
+    tomorrow_from: tomorrow.kickoff_from,
+    tomorrow_to: tomorrow.kickoff_to,
+    upcoming_from: tomorrow.kickoff_from,
+    upcoming_to: '2026-07-20T05:00:00.000Z',
+    weather_refresh_limit: '8'
+  };
+}
+
+async function getMatchesOverview(options = {}) {
+  return cached('web/matches-overview', matchesOverviewParams(), 30000, options);
+}
+
 function renderDateToolbar() {
   return `
     <div class="toolbar">
@@ -413,16 +435,17 @@ function attachDaySwipe(container) {
     const nextMode = adjacentDateMode(deltaX < 0 ? 1 : -1);
     if (!nextMode) return;
     state.dateMode = nextMode;
-    invalidateViewCache('web/matches');
     container.classList.add(deltaX < 0 ? 'swipe-left' : 'swipe-right');
-    window.setTimeout(() => renderToday(), 80);
+    renderToday({ localOnly: true });
   }, { passive: true });
 }
 
 async function renderToday(options = {}) {
-  if (!options.silent) loading('Partidos');
-  const data = await cached('web/matches', todayParams(), 30000, options);
-  const matches = data.matches || [];
+  const cacheKey = `web/matches-overview:${JSON.stringify(matchesOverviewParams())}`;
+  const cachedOverview = state.cache.get(cacheKey);
+  if (!options.silent && !options.localOnly && !cachedOverview) loading('Partidos');
+  const data = cachedOverview && options.localOnly ? cachedOverview.data : await getMatchesOverview(options);
+  const matches = data[state.dateMode] || [];
   setStatus('Partidos', `${matches.length} registros`);
   const grouped = matches.reduce((acc, match) => {
     const key = dateLabel(match.kickoff_at);
@@ -439,8 +462,7 @@ async function renderToday(options = {}) {
     button.addEventListener('click', () => {
       if (state.dateMode === button.dataset.dateMode) return;
       state.dateMode = button.dataset.dateMode;
-      invalidateViewCache('web/matches');
-      renderToday();
+      renderToday({ localOnly: true });
     });
   });
   const todayView = root.querySelector('.today-view');
@@ -701,7 +723,7 @@ $('#refresh-btn').addEventListener('click', () => {
 
 function refreshSilently() {
   if (!savedKey() || document.hidden) return;
-  const path = state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches';
+  const path = state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches-overview';
   invalidateViewCache(path);
   render({ silent: true });
 }
