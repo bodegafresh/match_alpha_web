@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Match Alpha · Mundial 2026</title>
+  <meta name="description" content="Dashboard Supabase-first para Mundial 2026: partidos, posiciones, equipos y eliminatorias.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">MA</div>
+      <div>
+        <h1>Match Alpha</h1>
+        <p>Mundial FIFA 2026</p>
+      </div>
+    </div>
+    <nav class="tabs" aria-label="Secciones">
+      <button class="tab active" data-view="today">Hoy</button>
+      <button class="tab" data-view="standings">Posiciones</button>
+      <button class="tab" data-view="teams">Equipos</button>
+      <button class="tab" data-view="knockout">Eliminatorias</button>
+    </nav>
+    <button id="refresh-btn" class="icon-btn" type="button" title="Actualizar" aria-label="Actualizar">↻</button>
+  </header>
+
+  <main class="shell">
+    <section id="status-strip" class="status-strip"></section>
+    <section id="view-root" class="view-root"></section>
+  </main>
+
+  <template id="login-template">
+    <form class="login-box" id="login-form">
+      <h2>Acceso</h2>
+      <p>Ingresa la clave configurada en el Worker para consultar la API del proyecto.</p>
+      <input id="api-key-input" type="password" placeholder="WEB_KEY" autocomplete="current-password">
+      <button type="submit">Entrar</button>
+      <small id="login-error"></small>
+    </form>
+  </template>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
