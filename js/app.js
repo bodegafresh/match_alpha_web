@@ -73,6 +73,9 @@ async function apiGet(path, params = {}) {
     throw new Error('Unauthorized');
   }
   if (!response.ok || json.ok === false) throw new Error(json.error || `HTTP ${response.status}`);
+  if (!json || typeof json !== 'object' || !('data' in json)) {
+    throw new Error('Respuesta API inválida: falta data. Revisa API_BASE_URL y Worker /api/v1.');
+  }
   return json.data;
 }
 
