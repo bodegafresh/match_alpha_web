@@ -1,0 +1,21 @@
+css/styles.css
+  s_b04792a387deb8::t_0c04a6f8d62b50 100-101,145-283
+js/app.js
+  s_b04792a387deb8::t_cf8a6ab33670c7 6,25,37,40,50-96,230-231,234-239,241-242,302,312-418
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "66a04b1a32c84aa8e7de28560a2ae6c9500f44d8",
+  "prompts": {},
+  "sessions": {
+    "s_b04792a387deb8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ef0c5-4049-7aa0-bb43-b8b33e24f151",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Marco Cerda <marco.cerda@mercadolibre.cl>"
+    }
+  }
+}
