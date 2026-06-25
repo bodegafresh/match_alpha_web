@@ -122,7 +122,11 @@ button:focus-visible, input:focus-visible {
   border: 1px solid var(--line);
   border-radius: 15px;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
 }
+.segment::-webkit-scrollbar { display: none; }
 .segment button {
   border: 0;
   background: transparent;
@@ -133,6 +137,7 @@ button:focus-visible, input:focus-visible {
   min-height: 42px;
   font-weight: 800;
   white-space: nowrap;
+  scroll-snap-align: start;
   transition: background 180ms var(--ease), color 180ms var(--ease), transform 180ms var(--ease);
 }
 .segment button span { margin-right: .32rem; color: var(--accent-2); }
@@ -167,7 +172,7 @@ button:focus-visible, input:focus-visible {
   box-shadow: var(--shadow);
 }
 .match-card {
-  min-height: 230px;
+  min-height: 214px;
   padding: 22px;
   display: grid;
   gap: 1rem;
@@ -182,6 +187,7 @@ button:focus-visible, input:focus-visible {
 .match-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: .8rem;
   color: var(--faint);
   font-size: .78rem;
@@ -248,6 +254,8 @@ button:focus-visible, input:focus-visible {
   font-size: .86rem;
   line-height: 1.35;
   text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .weather {
   display: flex;
@@ -618,26 +626,169 @@ tbody tr:hover { background: rgba(255, 255, 255, .035); }
   .tab { white-space: nowrap; }
   .shell { width: min(100% - 2rem, 1360px); }
   .grid { grid-template-columns: 1fr; gap: 18px; }
-  .match-card { min-height: 218px; padding: 20px; }
+  .match-card { min-height: 190px; padding: 18px; gap: .75rem; }
   .status-strip { font-size: .8rem; }
 }
 
 @media (max-width: 680px) {
-  .topbar { padding-inline: 1rem; }
+  body {
+    background:
+      linear-gradient(145deg, rgba(53, 194, 255, .08), transparent 24rem),
+      linear-gradient(180deg, #091827 0%, var(--bg) 30rem);
+  }
+  .topbar {
+    padding: .72rem .9rem .82rem;
+    gap: .7rem;
+  }
   .brand-mark { width: 40px; height: 40px; }
   .brand h1 { font-size: .98rem; }
   .brand p { font-size: .68rem; }
-  .shell { width: min(100% - 1rem, 1360px); margin-top: 1rem; }
-  .segment { width: 100%; }
-  .segment button { flex: 0 0 auto; min-width: 94px; }
-  .section-title { font-size: .86rem; }
-  .match-meta { display: grid; gap: .45rem; }
-  .match-time { text-align: left; }
-  .teams-row { gap: .6rem; }
-  .team-side .flag { font-size: 1.9rem; }
-  .team-side .name { font-size: .92rem; }
-  .score { min-width: 4.6rem; font-size: 1.85rem; }
-  .weather { font-size: .78rem; }
+  .tabs {
+    gap: .42rem;
+    margin-inline: -.15rem;
+  }
+  .tab {
+    min-height: 38px;
+    padding: .5rem .72rem;
+    border-radius: 999px;
+    font-size: .86rem;
+  }
+  .icon-btn {
+    width: 40px;
+    min-height: 40px;
+    border-radius: 999px;
+  }
+  .shell { width: min(100% - 1rem, 1360px); margin-top: .75rem; }
+  .status-strip {
+    min-height: 28px;
+    font-size: .74rem;
+    padding-inline: .15rem;
+  }
+  .view-root { gap: .95rem; }
+  .toolbar {
+    position: sticky;
+    top: 108px;
+    z-index: 6;
+    margin-inline: -.5rem;
+    padding: .35rem .5rem .45rem;
+    background: linear-gradient(180deg, rgba(7, 17, 31, .92), rgba(7, 17, 31, .74));
+    backdrop-filter: blur(12px);
+  }
+  .segment {
+    width: 100%;
+    padding: .28rem;
+    gap: .34rem;
+    border-radius: 999px;
+    background: rgba(16, 34, 56, .62);
+  }
+  .segment button {
+    flex: 0 0 auto;
+    min-width: 90px;
+    min-height: 38px;
+    padding: .5rem .68rem;
+    border-radius: 999px;
+    font-size: .84rem;
+  }
+  .segment button:active,
+  .tab:active,
+  .clickable-card:active,
+  .match-card:active {
+    transform: scale(.985);
+  }
+  .section-title {
+    font-size: .78rem;
+    margin: .2rem 0 0;
+    gap: .6rem;
+  }
+  .grid { gap: 12px; }
+  .match-card {
+    min-height: auto;
+    padding: 13px 14px;
+    gap: .58rem;
+    border-radius: 16px;
+  }
+  .match-card:hover { transform: none; }
+  .match-meta {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    font-size: .68rem;
+    line-height: 1.15;
+  }
+  .stage-chip {
+    max-width: 48%;
+    padding: .2rem .42rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .match-time {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .teams-row {
+    gap: .45rem;
+    grid-template-columns: minmax(0, 1fr) minmax(52px, auto) minmax(0, 1fr);
+  }
+  .team-side {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    justify-content: center;
+  }
+  .team-side:first-child { justify-content: flex-start; }
+  .team-side:last-child { justify-content: flex-end; flex-direction: row-reverse; }
+  .team-side .flag { font-size: 1.42rem; }
+  .team-side .name {
+    font-size: .86rem;
+    text-align: left;
+  }
+  .team-side:last-child .name { text-align: right; }
+  .score {
+    min-width: 52px;
+    font-size: 1.34rem;
+    gap: .24rem;
+  }
+  .score.pending {
+    font-size: .78rem;
+    letter-spacing: .06em;
+  }
+  .venue {
+    font-size: .74rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .weather {
+    justify-content: flex-start;
+    padding: .42rem .52rem;
+    font-size: .72rem;
+    border-radius: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .team-card {
+    padding: 14px;
+    gap: .65rem;
+    border-radius: 16px;
+  }
+  .team-grid .team-card { min-height: auto; }
+  .team-head .flag { font-size: 1.75rem; }
+  .team-head h3 { font-size: .94rem; }
+  .team-head p,
+  .team-rating { font-size: .75rem; }
+  .points-pill { font-size: .76rem; }
+  .stats-line { gap: .4rem; }
+  .stat { padding: .45rem; border-radius: 10px; }
+  .form-dots span {
+    min-width: 24px;
+    height: 24px;
+    font-size: .66rem;
+  }
   .modal-overlay { align-items: stretch; padding: 0; }
   .modal-card { width: 100%; max-height: 100vh; border-radius: 0; }
   .team-result-row { grid-template-columns: 3.8rem 1fr auto 1.8rem; }
