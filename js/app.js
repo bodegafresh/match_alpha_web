@@ -3,6 +3,7 @@ const API_BASE_URL = String(CFG.API_BASE_URL || '').replace(/\/+$/, '');
 const SEASON = CFG.DEFAULT_SEASON || 'wc2026';
 const KEY_STORAGE = CFG.KEY_STORAGE || 'match_alpha_web_key';
 const AUTO_REFRESH_MS = Number(CFG.AUTO_REFRESH_MS || 30000);
+const CHILE_TIMEZONE = 'America/Santiago';
 
 const state = {
   view: 'today',
@@ -21,7 +22,7 @@ function saveKey(value) { localStorage.setItem(KEY_STORAGE, value || ''); }
 function clearKey() { localStorage.removeItem(KEY_STORAGE); }
 
 function ymd(date) {
-  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(date);
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: CHILE_TIMEZONE }).format(date);
 }
 
 function addDays(date, days) {
@@ -33,10 +34,10 @@ function addDays(date, days) {
 function dateLabel(value) {
   if (!value) return '';
   const date = new Date(value);
-  return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: 'America/Santiago' }).format(date).replace('.', '');
+  return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: CHILE_TIMEZONE }).format(date).replace('.', '');
 }
 
-function timeLabel(value, timeZone = 'America/Santiago') {
+function timeLabel(value, timeZone = CHILE_TIMEZONE) {
   if (!value) return '';
   return new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }).format(new Date(value));
 }
@@ -44,6 +45,53 @@ function timeLabel(value, timeZone = 'America/Santiago') {
 function chileDateTimeLabel(value) {
   if (!value) return '';
   return `${dateLabel(value)} · ${timeLabel(value)} Chile`;
+}
+
+function chileParts(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CHILE_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second)
+  };
+}
+
+function chileDateToUtcIso(ymdValue, hour = 0, minute = 0) {
+  const [year, month, day] = String(ymdValue).split('-').map(Number);
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  for (let i = 0; i < 3; i += 1) {
+    const parts = chileParts(guess);
+    const diffMinutes =
+      (Date.UTC(year, month - 1, day, hour, minute, 0) -
+       Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second || 0)) / 60000;
+    guess = new Date(guess.getTime() + diffMinutes * 60000);
+  }
+  return guess.toISOString();
+}
+
+function chileOperationalRange(baseDate, offsetDays = 0) {
+  const startYmd = ymd(addDays(baseDate, offsetDays));
+  const nextYmd = ymd(addDays(baseDate, offsetDays + 1));
+  return {
+    kickoff_from: chileDateToUtcIso(startYmd, 0, 0),
+    kickoff_to: chileDateToUtcIso(nextYmd, 1, 0),
+    label: startYmd
+  };
 }
 
 function localVenueTimeLabel(match) {
@@ -179,16 +227,19 @@ function matchCard(match) {
 function todayParams() {
   const now = new Date();
   if (state.dateMode === 'yesterday') {
-    const d = ymd(addDays(now, -1));
-    return { date_from: d, date_to: d };
+    const range = chileOperationalRange(now, -1);
+    return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
   }
   if (state.dateMode === 'tomorrow') {
-    const d = ymd(addDays(now, 1));
-    return { date_from: d, date_to: d };
+    const range = chileOperationalRange(now, 1);
+    return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
   }
-  if (state.dateMode === 'upcoming') return { date_from: ymd(addDays(now, 1)), date_to: '2026-07-19' };
-  const d = ymd(now);
-  return { date_from: d, date_to: d };
+  if (state.dateMode === 'upcoming') {
+    const range = chileOperationalRange(now, 1);
+    return { kickoff_from: range.kickoff_from, kickoff_to: '2026-07-20T05:00:00.000Z' };
+  }
+  const range = chileOperationalRange(now, 0);
+  return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
 }
 
 async function renderToday(options = {}) {
@@ -248,7 +299,7 @@ async function renderTeams(options = {}) {
     <section>
       <h2 class="section-title">${escapeHtml(groupName)}</h2>
       <div class="grid">${byGroup[groupName].map((team) => `
-        <article class="card team-card">
+        <article class="card team-card clickable-card" data-team-slug="${escapeHtml(team.slug)}">
           <div class="team-head"><div class="flag">${team.flag_emoji || '🏳️'}</div><div><h3>${escapeHtml(team.display_name)}</h3><p>${escapeHtml(team.country_code || '')} · Plantel ${team.roster_count}</p></div></div>
           <div class="stats-line">
             <div class="stat"><b>${team.points}</b><span>Pts</span></div>
@@ -258,6 +309,113 @@ async function renderTeams(options = {}) {
           </div>
         </article>`).join('')}</div>
     </section>`).join('') || emptyState('No hay equipos disponibles.');
+  root.querySelectorAll('[data-team-slug]').forEach((card) => {
+    card.addEventListener('click', () => openTeamModal(card.dataset.teamSlug));
+  });
+}
+
+async function openTeamModal(teamSlug) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = '<div class="modal-card"><div class="loading">Cargando equipo...</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) closeModal(overlay);
+  });
+  try {
+    const detail = await cached('web/team-detail', { team_slug: teamSlug }, 60000);
+    overlay.innerHTML = teamModalHtml(detail);
+    overlay.querySelector('[data-close-modal]').addEventListener('click', () => closeModal(overlay));
+    overlay.querySelectorAll('[data-modal-tab]').forEach((button) => {
+      button.addEventListener('click', () => setModalTab(overlay, button.dataset.modalTab));
+    });
+  } catch (error) {
+    overlay.innerHTML = `<div class="modal-card"><button class="modal-close" data-close-modal>×</button><div class="error">${escapeHtml(error.message || error)}</div></div>`;
+    overlay.querySelector('[data-close-modal]').addEventListener('click', () => closeModal(overlay));
+  }
+}
+
+function closeModal(overlay) {
+  overlay.remove();
+}
+
+function setModalTab(overlay, tab) {
+  overlay.querySelectorAll('[data-modal-tab]').forEach((button) => button.classList.toggle('active', button.dataset.modalTab === tab));
+  overlay.querySelectorAll('[data-modal-panel]').forEach((panel) => panel.hidden = panel.dataset.modalPanel !== tab);
+}
+
+function teamModalHtml(detail) {
+  const team = detail.team || {};
+  const matches = detail.matches || [];
+  const roster = detail.roster || [];
+  return `
+    <div class="modal-card team-modal" role="dialog" aria-modal="true">
+      <button class="modal-close" data-close-modal aria-label="Cerrar">×</button>
+      <header class="modal-header">
+        <div class="flag">${team.flag_emoji || '🏳️'}</div>
+        <div>
+          <h2>${escapeHtml(team.display_name || 'Equipo')}</h2>
+          <p>${escapeHtml(team.group_name || team.country_code || '')}</p>
+        </div>
+      </header>
+      <section class="modal-section">
+        <h3>Resultados Mundial 2026</h3>
+        <div class="team-results">${matches.map(teamResultRow).join('') || emptyState('No hay partidos publicados para este equipo.')}</div>
+      </section>
+      <div class="modal-tabs">
+        <button class="active" data-modal-tab="roster">Plantel</button>
+        <button data-modal-tab="stats">Stats WC</button>
+      </div>
+      <section data-modal-panel="roster">${rosterGrid(roster)}</section>
+      <section data-modal-panel="stats" hidden>${rosterStatsTable(roster)}</section>
+    </div>`;
+}
+
+function teamResultRow(match) {
+  const home = match.home || {};
+  const away = match.away || {};
+  const result = match.team_result || '';
+  const resultClass = result === 'W' ? 'result-win' : result === 'L' ? 'result-loss' : 'result-draw';
+  const score = match.home_score !== null && match.home_score !== undefined ? `${match.home_score}-${match.away_score}` : 'vs';
+  return `
+    <div class="team-result-row">
+      <span>${escapeHtml(dateLabel(match.kickoff_at))}</span>
+      <strong>${home.flag_emoji || '🏳️'} ${escapeHtml(home.display_name || 'Por definir')} vs ${away.flag_emoji || '🏳️'} ${escapeHtml(away.display_name || 'Por definir')}</strong>
+      <b>${escapeHtml(score)}</b>
+      <em class="${resultClass}">${escapeHtml(result || '-')}</em>
+      <small>${escapeHtml(match.venue?.city || match.venue?.display_name || '')}</small>
+    </div>`;
+}
+
+function rosterGrid(roster) {
+  return `<div class="roster-grid">${roster.map((player) => `
+    <div class="player-pill">
+      <span>${escapeHtml(player.position || 'UNK')}</span>
+      <strong>${escapeHtml(player.display_name || '')}</strong>
+    </div>`).join('') || emptyState('Plantel no disponible.')}</div>`;
+}
+
+function rosterStatsTable(roster) {
+  return `
+    <div class="table-card modal-table">
+      <table>
+        <thead><tr><th>POS</th><th>Jugador</th><th>J</th><th>Min</th><th>G</th><th>A</th><th>TA</th><th>TR</th><th>Rating</th></tr></thead>
+        <tbody>${roster.map((player) => {
+          const stats = player.stats || {};
+          return `<tr>
+            <td>${escapeHtml(player.position || 'UNK')}</td>
+            <td>${escapeHtml(player.display_name || '')}</td>
+            <td>${stats.appearances || 0}</td>
+            <td>${stats.minutes || 0}</td>
+            <td>${stats.goals || 0}</td>
+            <td>${stats.assists || 0}</td>
+            <td>${stats.yellow_cards || 0}</td>
+            <td>${stats.red_cards || 0}</td>
+            <td>${stats.avg_rating ?? '-'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
 }
 
 async function renderKnockout(options = {}) {

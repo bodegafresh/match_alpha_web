@@ -97,6 +97,8 @@ td { color: var(--text); font-size: .9rem; }
 .group-heading { margin: .8rem 0 0; color: var(--accent); font-size: .95rem; }
 
 .team-card { padding: 1rem; display: grid; gap: .75rem; }
+.clickable-card { cursor: pointer; transition: border-color .16s ease, transform .16s ease; }
+.clickable-card:hover { border-color: #49699f; transform: translateY(-1px); }
 .team-head { display: flex; align-items: center; gap: .75rem; }
 .team-head .flag { font-size: 2.1rem; }
 .team-head h3 { margin: 0; font-size: 1rem; }
@@ -139,4 +141,144 @@ td { color: var(--text); font-size: .9rem; }
   margin-top: .2rem;
   color: var(--faint);
   font-size: .72rem;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, .72);
+}
+.modal-card {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.team-modal { padding-bottom: 1rem; }
+.modal-close {
+  position: absolute;
+  top: .8rem;
+  right: .85rem;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: .9rem;
+  padding: 1.2rem 3.5rem 1rem 1.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.modal-header .flag { font-size: 2rem; }
+.modal-header h2 { margin: 0; font-size: 1.35rem; }
+.modal-header p { margin: .2rem 0 0; color: var(--muted); }
+.modal-section { padding: 1rem 1.2rem; }
+.modal-section h3 {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin: 0 0 .7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .82rem;
+}
+.modal-section h3::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+.team-results { display: grid; gap: .65rem; }
+.team-result-row {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr auto 2rem minmax(5rem, .45fr);
+  gap: .7rem;
+  align-items: center;
+  color: var(--muted);
+}
+.team-result-row strong { color: var(--text); }
+.team-result-row b { color: var(--ok); font-size: 1.05rem; }
+.team-result-row em {
+  justify-self: center;
+  min-width: 1.7rem;
+  padding: .2rem .45rem;
+  border-radius: 6px;
+  font-style: normal;
+  text-align: center;
+  font-weight: 800;
+}
+.result-win { background: rgba(66, 230, 124, .18); color: var(--ok); }
+.result-loss { background: rgba(255, 91, 110, .18); color: var(--danger); }
+.result-draw { background: rgba(251, 191, 36, .18); color: var(--warn); }
+.team-result-row small { color: var(--faint); }
+.modal-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .5rem;
+  padding: 0 1.2rem 1rem;
+}
+.modal-tabs button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+.modal-tabs button.active {
+  border-color: #fff;
+  color: var(--text);
+  background: #17213a;
+}
+.roster-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  padding: 0 1.2rem;
+}
+.player-pill {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: 42px;
+  padding: .5rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(22, 34, 56, .66);
+}
+.player-pill span {
+  min-width: 2.2rem;
+  padding: .18rem .35rem;
+  border-radius: 5px;
+  background: #1d2d4c;
+  color: var(--muted);
+  font-weight: 800;
+  text-align: center;
+  font-size: .75rem;
+}
+.player-pill strong { font-size: .9rem; }
+.modal-table { margin: 0 1.2rem; }
+.modal-table table { min-width: 620px; }
+
+@media (max-width: 680px) {
+  .modal-overlay { align-items: stretch; padding: 0; }
+  .modal-card { width: 100%; max-height: 100vh; border-radius: 0; }
+  .team-result-row {
+    grid-template-columns: 3.8rem 1fr auto 1.8rem;
+  }
+  .team-result-row small { grid-column: 2 / -1; }
+  .modal-tabs { position: sticky; top: 0; background: var(--panel); z-index: 1; padding-top: .75rem; }
+  .roster-grid { display: grid; grid-template-columns: 1fr; }
 }
