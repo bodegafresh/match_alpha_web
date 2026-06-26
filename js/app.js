@@ -13,6 +13,7 @@ const state = {
   lastUpdatedAt: null,
   renderSeq: 0,
   activeController: null,
+  knockoutStage: 'ROUND_OF_32',
 };
 
 const dateModes = [
@@ -173,8 +174,17 @@ function stageLabel(value) {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
+function matchStageLabel(match) {
+  return match?.stage_label || stageLabel(match?.stage_name || match?.stage_code);
+}
+
+function matchGroupLabel(match) {
+  return match?.group_label || groupLabel(match?.group_name || match?.group_code);
+}
+
 function knockoutStageKey(match) {
-  const raw = `${match.stage_code || ''} ${match.stage_name || ''}`.toUpperCase();
+  if (knockoutStages.some((stage) => stage.key === match.stage_code)) return match.stage_code;
+  const raw = `${match.stage_code || ''} ${match.stage_name || ''} ${match.stage_label || ''}`.toUpperCase();
   if (raw.includes('32') || raw.includes('DIECISEIS')) return 'ROUND_OF_32';
   if (raw.includes('16') || raw.includes('OCTAV')) return 'ROUND_OF_16';
   if (raw.includes('QUARTER') || raw.includes('CUART')) return 'QUARTER_FINAL';
@@ -182,6 +192,12 @@ function knockoutStageKey(match) {
   if (raw.includes('THIRD') || raw.includes('TERCER')) return 'THIRD_PLACE';
   if (raw.includes('FINAL')) return 'FINAL';
   return match.stage_code || match.stage_name || 'KNOCKOUT';
+}
+
+function teamFlag(team) {
+  if (team?.flag_asset) return `<img class="flag-img" src="${escapeHtml(team.flag_asset)}" alt="" loading="lazy">`;
+  if (team?.flag_emoji) return escapeHtml(team.flag_emoji);
+  return team?.is_placeholder ? '<span class="placeholder-icon">◇</span>' : '🏳️';
 }
 
 async function apiGet(path, params = {}, options = {}) {
@@ -200,11 +216,13 @@ async function apiGet(path, params = {}, options = {}) {
     renderLogin('Clave inválida o no configurada.');
     throw new Error('Unauthorized');
   }
-  if (!response.ok || json.ok === false) throw new Error(json.error || `HTTP ${response.status}`);
-  if (!json || typeof json !== 'object' || !('data' in json)) {
-    throw new Error('Respuesta API inválida: falta data. Revisa API_BASE_URL y Worker /api/v1.');
+  if (!response.ok || json.ok === false) {
+    const detail = json.detail || json.error || json.message;
+    const message = typeof detail === 'string' ? detail : detail?.message || JSON.stringify(detail || {});
+    throw new Error(message || `HTTP ${response.status}`);
   }
-  return json.data || {};
+  if (!json || typeof json !== 'object') throw new Error('Respuesta API inválida.');
+  return 'data' in json ? (json.data || {}) : json;
 }
 
 async function cached(path, params = {}, ttlMs = 120000, options = {}) {
@@ -334,8 +352,8 @@ function venueDetailHtml(match) {
 function matchCard(match) {
   const home = match.home || { display_name: 'Por definir', flag_emoji: '🏳️' };
   const away = match.away || { display_name: 'Por definir', flag_emoji: '🏳️' };
-  const group = groupLabel(match.group_name || match.group_code);
-  const stage = stageLabel(match.stage_name || match.stage_code);
+  const group = matchGroupLabel(match);
+  const stage = matchStageLabel(match);
   const meta = [stage, group].filter(Boolean).join(' · ');
   return `
     <article class="card match-card fade-in">
@@ -344,9 +362,9 @@ function matchCard(match) {
         <span class="match-time ${statusClass(match.status)}">${escapeHtml(statusLabel(match.status))} · ${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</span>
       </div>
       <div class="teams-row">
-        <div class="team-side"><div class="flag">${home.flag_emoji || '🏳️'}</div><div class="name" title="${escapeHtml(home.display_name)}">${escapeHtml(teamShortName(home))}</div></div>
+        <div class="team-side"><div class="flag">${teamFlag(home)}</div><div class="name" title="${escapeHtml(home.display_name)}">${escapeHtml(teamShortName(home))}</div></div>
         ${matchScore(match)}
-        <div class="team-side"><div class="flag">${away.flag_emoji || '🏳️'}</div><div class="name" title="${escapeHtml(away.display_name)}">${escapeHtml(teamShortName(away))}</div></div>
+        <div class="team-side"><div class="flag">${teamFlag(away)}</div><div class="name" title="${escapeHtml(away.display_name)}">${escapeHtml(teamShortName(away))}</div></div>
       </div>
       ${venueDetailHtml(match)}
       ${weatherHtml(match)}
@@ -483,7 +501,7 @@ async function renderStandings(options = {}) {
           <tbody>${(group.standings || []).map((row, index) => `
             <tr>
               <td>${row.position || index + 1}</td>
-              <td><strong>${row.flag_emoji || '🏳️'} ${escapeHtml(row.team_name)}</strong></td>
+              <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name)}</strong></td>
               <td><strong>${row.points}</strong></td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${row.goals_for}</td><td>${row.goals_against}</td><td>${row.goal_difference}</td>
             </tr>`).join('')}</tbody>
         </table>
@@ -517,7 +535,7 @@ function teamCard(team) {
     <article class="card team-card clickable-card fade-in" data-team-slug="${escapeHtml(team.slug)}" tabindex="0">
       <div class="team-card-top">
         <div class="team-head">
-          <div class="flag">${team.flag_emoji || '🏳️'}</div>
+          <div class="flag">${teamFlag(team)}</div>
           <div><h3>${escapeHtml(team.display_name)}</h3><p>${escapeHtml(groupLabel(team.group_name || team.group_code) || team.country_code || '')}</p></div>
         </div>
         <strong class="points-pill">#${team.position || '-'} · ${team.points ?? 0} pts</strong>
@@ -571,7 +589,7 @@ function teamModalHtml(detail) {
     <div class="modal-card team-modal" role="dialog" aria-modal="true">
       <button class="modal-close" data-close-modal aria-label="Cerrar">×</button>
       <header class="modal-header">
-        <div class="flag">${team.flag_emoji || '🏳️'}</div>
+        <div class="flag">${teamFlag(team)}</div>
         <div>
           <h2>${escapeHtml(team.display_name || 'Equipo')}</h2>
           <p>${escapeHtml(groupLabel(team.group_name || team.group_code) || team.country_code || '')}</p>
@@ -599,7 +617,7 @@ function teamResultRow(match) {
   return `
     <div class="team-result-row">
       <span>${escapeHtml(dateLabel(match.kickoff_at).toLowerCase())}</span>
-      <strong>${home.flag_emoji || '🏳️'} ${escapeHtml(home.display_name || 'Por definir')} vs ${away.flag_emoji || '🏳️'} ${escapeHtml(away.display_name || 'Por definir')}</strong>
+      <strong>${teamFlag(home)} ${escapeHtml(home.display_name || 'Por definir')} vs ${teamFlag(away)} ${escapeHtml(away.display_name || 'Por definir')}</strong>
       <b>${escapeHtml(score)}</b>
       <em class="${resultClass}">${escapeHtml(result || '-')}</em>
       <small>${escapeHtml(match.venue?.city || match.venue?.display_name || '')}</small>
@@ -647,10 +665,31 @@ async function renderKnockout(options = {}) {
     (acc[key] ||= []).push(match);
     return acc;
   }, {});
+  if (!byStage[state.knockoutStage]) {
+    state.knockoutStage = knockoutStages.find((stage) => byStage[stage.key]?.length)?.key || 'ROUND_OF_32';
+  }
+  const active = knockoutStages.find((stage) => stage.key === state.knockoutStage) || knockoutStages[0];
+  const activeMatches = byStage[active.key] || [];
   root.innerHTML = `
-    <div class="knockout-board">
-      ${knockoutStages.map((stage) => knockoutColumn(stage, byStage[stage.key] || [])).join('')}
+    <div class="knockout-view fade-in">
+      <div class="knockout-tabs" role="tablist" aria-label="Fases eliminatorias">
+        ${knockoutStages.map((stage) => `
+          <button class="${stage.key === active.key ? 'active' : ''}" data-knockout-stage="${stage.key}" type="button" role="tab" aria-selected="${stage.key === active.key ? 'true' : 'false'}">
+            ${escapeHtml(stage.title)}
+            <span>${(byStage[stage.key] || []).length || stage.count}</span>
+          </button>`).join('')}
+      </div>
+      ${knockoutColumn(active, activeMatches)}
     </div>`;
+  root.querySelectorAll('[data-knockout-stage]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.dataset.knockoutStage === state.knockoutStage) return;
+      state.knockoutStage = button.dataset.knockoutStage;
+      renderKnockout({ localOnly: true });
+    });
+  });
+  const view = root.querySelector('.knockout-view');
+  if (view) attachKnockoutSwipe(view);
 }
 
 function knockoutColumn(stage, matches) {
@@ -664,13 +703,47 @@ function knockoutColumn(stage, matches) {
     </section>`;
 }
 
+function adjacentKnockoutStage(direction) {
+  const stages = knockoutStages.map((stage) => stage.key);
+  const current = stages.indexOf(state.knockoutStage);
+  const next = current + direction;
+  return stages[next] || null;
+}
+
+function attachKnockoutSwipe(container) {
+  let startX = 0;
+  let startY = 0;
+  let startedAt = 0;
+  container.addEventListener('touchstart', (event) => {
+    if (event.target.closest('.knockout-tabs, button, a, .modal-overlay')) return;
+    const touch = event.changedTouches[0];
+    startX = touch.clientX;
+    startY = touch.clientY;
+    startedAt = Date.now();
+  }, { passive: true });
+  container.addEventListener('touchend', (event) => {
+    if (!startedAt) return;
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    const elapsed = Date.now() - startedAt;
+    startedAt = 0;
+    if (Math.abs(deltaX) < 54 || Math.abs(deltaX) < Math.abs(deltaY) * 1.35 || elapsed > 650) return;
+    const nextStage = adjacentKnockoutStage(deltaX < 0 ? 1 : -1);
+    if (!nextStage) return;
+    state.knockoutStage = nextStage;
+    container.classList.add(deltaX < 0 ? 'swipe-left' : 'swipe-right');
+    renderKnockout({ localOnly: true });
+  }, { passive: true });
+}
+
 function knockoutCard(match) {
   return `
     <article class="card bracket-card fade-in">
       <div class="bracket-top"><span>${escapeHtml(match.match_number ? `Partido ${match.match_number}` : 'Partido')}</span><b>${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</b></div>
-      <div class="bracket-team">${match.home?.flag_emoji || '🏳️'} <strong>${escapeHtml(match.home?.display_name || 'Por definir')}</strong></div>
+      <div class="bracket-team">${teamFlag(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong></div>
       <div class="bracket-vs">${matchScore(match)}</div>
-      <div class="bracket-team">${match.away?.flag_emoji || '🏳️'} <strong>${escapeHtml(match.away?.display_name || 'Por definir')}</strong></div>
+      <div class="bracket-team">${teamFlag(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong></div>
       <div class="venue compact">📍 ${escapeHtml(match.venue?.display_name || 'Sede por definir')}</div>
     </article>`;
 }
@@ -682,9 +755,9 @@ function placeholderKnockoutCard(stage, index) {
   return `
     <article class="card bracket-card placeholder">
       <div class="bracket-top"><span>Partido ${index}</span><b>Por definir</b></div>
-      <div class="bracket-team">🏳️ <strong>${escapeHtml(labels[0])}</strong></div>
+      <div class="bracket-team"><span class="placeholder-icon">◇</span> <strong>${escapeHtml(labels[0])}</strong></div>
       <div class="bracket-vs">vs</div>
-      <div class="bracket-team">🏳️ <strong>${escapeHtml(labels[1])}</strong></div>
+      <div class="bracket-team"><span class="placeholder-icon">◇</span> <strong>${escapeHtml(labels[1])}</strong></div>
       <div class="venue compact">📍 Sede por confirmar</div>
     </article>`;
 }
@@ -695,7 +768,6 @@ async function render(options = {}) {
   state.activeController = new AbortController();
   const renderOptions = { ...options, signal: state.activeController.signal };
   try {
-    if (!savedKey()) return renderLogin();
     updateTabs();
     if (state.view === 'standings') await renderStandings(renderOptions);
     else if (state.view === 'teams') await renderTeams(renderOptions);
@@ -722,7 +794,7 @@ $('#refresh-btn').addEventListener('click', () => {
 });
 
 function refreshSilently() {
-  if (!savedKey() || document.hidden) return;
+  if (document.hidden) return;
   const path = state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches-overview';
   invalidateViewCache(path);
   render({ silent: true });
