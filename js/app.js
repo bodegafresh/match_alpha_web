@@ -11,6 +11,7 @@ const state = {
   cache: new Map(),
   refreshTimer: null,
   lastUpdatedAt: null,
+  layout: null,
   renderSeq: 0,
   activeController: null,
   knockoutStage: 'ROUND_OF_32',
@@ -30,25 +31,6 @@ const knockoutStages = [
   { key: 'SEMI_FINAL', title: 'Semifinales', count: 2 },
   { key: 'THIRD_PLACE', title: 'Tercer puesto', count: 1 },
   { key: 'FINAL', title: 'Final', count: 1 },
-];
-
-const roundOf32Slots = [
-  ['Grupo A · 2°', 'Grupo B · 2°'],
-  ['Grupo C · 1°', 'Grupo F · 2°'],
-  ['Grupo E · 1°', 'Mejor 3° · A/B/C/D/F'],
-  ['Grupo F · 1°', 'Grupo C · 2°'],
-  ['Grupo I · 1°', 'Mejor 3° · C/D/F/G/H'],
-  ['Grupo E · 2°', 'Grupo I · 2°'],
-  ['Grupo A · 1°', 'Mejor 3° · C/E/F/H/I'],
-  ['Grupo L · 1°', 'Mejor 3° · E/H/I/J/K'],
-  ['Grupo D · 1°', 'Mejor 3° · B/E/F/I/J'],
-  ['Grupo G · 1°', 'Grupo K · 2°'],
-  ['Grupo J · 1°', 'Grupo H · 2°'],
-  ['Grupo B · 1°', 'Mejor 3° · E/F/G/I/J'],
-  ['Grupo H · 1°', 'Grupo J · 2°'],
-  ['Grupo K · 1°', 'Grupo L · 2°'],
-  ['Grupo D · 2°', 'Grupo G · 2°'],
-  ['Grupo C · 2°', 'Grupo A · 2°'],
 ];
 
 const $ = (selector) => document.querySelector(selector);
@@ -183,7 +165,8 @@ function matchGroupLabel(match) {
 }
 
 function knockoutStageKey(match) {
-  if (knockoutStages.some((stage) => stage.key === match.stage_code)) return match.stage_code;
+  const stages = knockoutStageDefinitions();
+  if (stages.some((stage) => stage.key === match.stage_code)) return match.stage_code;
   const raw = `${match.stage_code || ''} ${match.stage_name || ''} ${match.stage_label || ''}`.toUpperCase();
   if (raw.includes('32') || raw.includes('DIECISEIS')) return 'ROUND_OF_32';
   if (raw.includes('16') || raw.includes('OCTAV')) return 'ROUND_OF_16';
@@ -198,6 +181,89 @@ function teamFlag(team) {
   if (team?.flag_asset) return `<img class="flag-img" src="${escapeHtml(team.flag_asset)}" alt="" loading="lazy">`;
   if (team?.flag_emoji) return escapeHtml(team.flag_emoji);
   return team?.is_placeholder ? '<span class="placeholder-icon">◇</span>' : '🏳️';
+}
+
+function layoutKeyToView(key) {
+  return {
+    matches: 'today',
+    standings: 'standings',
+    teams: 'teams',
+    bracket: 'knockout',
+    knockout: 'knockout',
+  }[key] || key;
+}
+
+function fallbackLayout() {
+  return {
+    capabilities: {
+      has_groups: true,
+      has_league_table: false,
+      has_knockout: true,
+      has_standings: true,
+      has_teams: true,
+    },
+    ui: {
+      default_view: 'matches',
+      navigation: [
+        { key: 'matches', label: 'Partidos', enabled: true, order: 10 },
+        { key: 'standings', label: 'Posiciones', enabled: true, order: 20 },
+        { key: 'teams', label: 'Equipos', enabled: true, order: 30 },
+        { key: 'bracket', label: 'Eliminatorias', enabled: true, order: 40 },
+      ],
+    },
+    stages: knockoutStages.map((stage, index) => ({
+      stage_code: stage.key,
+      stage_label: stage.title,
+      stage_order: index + 1,
+      view_type: 'BRACKET_ROUND',
+      match_count: stage.count,
+    })),
+  };
+}
+
+async function ensureLayout(options = {}) {
+  if (state.layout && !options.forceLayoutRefresh) return state.layout;
+  try {
+    state.layout = await cached(`competitions/${SEASON}/layout`, {}, 300000, options);
+  } catch (error) {
+    console.warn('No se pudo cargar layout de competencia, usando fallback local.', error);
+    state.layout = fallbackLayout();
+  }
+  applyCompetitionLayout();
+  return state.layout;
+}
+
+function navigationItems() {
+  return (state.layout?.ui?.navigation || state.layout?.navigation || fallbackLayout().ui.navigation)
+    .filter((item) => item.enabled !== false)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
+function applyCompetitionLayout() {
+  const navByView = Object.fromEntries(navigationItems().map((item) => [layoutKeyToView(item.key), item]));
+  document.querySelectorAll('.tab').forEach((button) => {
+    const item = navByView[button.dataset.view];
+    button.hidden = !item;
+    if (item?.label) button.textContent = item.label;
+  });
+  if (!navByView[state.view]) {
+    const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
+    state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
+  }
+}
+
+function knockoutStageDefinitions() {
+  const layoutStages = state.layout?.stages || [];
+  const stages = layoutStages
+    .filter((stage) => String(stage.view_type || '').toUpperCase() === 'BRACKET_ROUND')
+    .sort((a, b) => (a.stage_order || 0) - (b.stage_order || 0))
+    .map((stage) => ({
+      key: stage.stage_code || stage.stage_name,
+      title: stage.stage_label || stage.stage_name || stage.stage_code || 'Eliminatoria',
+      count: stage.match_count || stage.rules?.expected_matches || 0,
+    }))
+    .filter((stage) => stage.key);
+  return stages.length ? stages : knockoutStages;
 }
 
 async function apiGet(path, params = {}, options = {}) {
@@ -249,6 +315,7 @@ function setStatus(text, strong = '') {
 }
 
 function updateTabs() {
+  if (state.layout) applyCompetitionLayout();
   document.querySelectorAll('.tab').forEach((button) => {
     const active = button.dataset.view === state.view;
     button.classList.toggle('active', active);
@@ -657,6 +724,7 @@ function rosterStatsTable(roster) {
 
 async function renderKnockout(options = {}) {
   if (!options.silent) loading('Eliminatorias');
+  const stages = knockoutStageDefinitions();
   const data = await cached('web/knockout', {}, 90000, options);
   const matches = data.matches || [];
   setStatus('Eliminatorias', `${matches.length} partidos`);
@@ -666,14 +734,14 @@ async function renderKnockout(options = {}) {
     return acc;
   }, {});
   if (!byStage[state.knockoutStage]) {
-    state.knockoutStage = knockoutStages.find((stage) => byStage[stage.key]?.length)?.key || 'ROUND_OF_32';
+    state.knockoutStage = stages.find((stage) => byStage[stage.key]?.length)?.key || stages[0]?.key || 'KNOCKOUT';
   }
-  const active = knockoutStages.find((stage) => stage.key === state.knockoutStage) || knockoutStages[0];
+  const active = stages.find((stage) => stage.key === state.knockoutStage) || stages[0];
   const activeMatches = byStage[active.key] || [];
   root.innerHTML = `
     <div class="knockout-view fade-in">
       <div class="knockout-tabs" role="tablist" aria-label="Fases eliminatorias">
-        ${knockoutStages.map((stage) => `
+        ${stages.map((stage) => `
           <button class="${stage.key === active.key ? 'active' : ''}" data-knockout-stage="${stage.key}" type="button" role="tab" aria-selected="${stage.key === active.key ? 'true' : 'false'}">
             ${escapeHtml(stage.title)}
             <span>${(byStage[stage.key] || []).length || stage.count}</span>
@@ -693,9 +761,10 @@ async function renderKnockout(options = {}) {
 }
 
 function knockoutColumn(stage, matches) {
+  const placeholderCount = Math.max(Number(stage.count || 0), 1);
   const cards = matches.length
     ? matches.map(knockoutCard).join('')
-    : Array.from({ length: stage.count }).map((_, index) => placeholderKnockoutCard(stage, index + 1)).join('');
+    : Array.from({ length: placeholderCount }).map((_, index) => placeholderKnockoutCard(stage, index + 1)).join('');
   return `
     <section class="knockout-column">
       <header><h2>${escapeHtml(stage.title)}</h2><span>${stage.count} partidos</span></header>
@@ -704,7 +773,7 @@ function knockoutColumn(stage, matches) {
 }
 
 function adjacentKnockoutStage(direction) {
-  const stages = knockoutStages.map((stage) => stage.key);
+  const stages = knockoutStageDefinitions().map((stage) => stage.key);
   const current = stages.indexOf(state.knockoutStage);
   const next = current + direction;
   return stages[next] || null;
@@ -749,9 +818,7 @@ function knockoutCard(match) {
 }
 
 function placeholderKnockoutCard(stage, index) {
-  const labels = stage.key === 'ROUND_OF_32' && roundOf32Slots[index - 1]
-    ? roundOf32Slots[index - 1]
-    : [`Ganador ${stage.title.toLowerCase()} ${index * 2 - 1}`, `Ganador ${stage.title.toLowerCase()} ${index * 2}`];
+  const labels = [`Clasificado por definir`, `Clasificado por definir`];
   return `
     <article class="card bracket-card placeholder">
       <div class="bracket-top"><span>Partido ${index}</span><b>Por definir</b></div>
@@ -768,6 +835,7 @@ async function render(options = {}) {
   state.activeController = new AbortController();
   const renderOptions = { ...options, signal: state.activeController.signal };
   try {
+    await ensureLayout(renderOptions);
     updateTabs();
     if (state.view === 'standings') await renderStandings(renderOptions);
     else if (state.view === 'teams') await renderTeams(renderOptions);
@@ -781,6 +849,7 @@ async function render(options = {}) {
 
 document.querySelectorAll('.tab').forEach((button) => {
   button.addEventListener('click', () => {
+    if (button.hidden) return;
     if (state.view === button.dataset.view) return;
     state.view = button.dataset.view;
     updateTabs();
@@ -790,11 +859,13 @@ document.querySelectorAll('.tab').forEach((button) => {
 
 $('#refresh-btn').addEventListener('click', () => {
   state.cache.clear();
+  state.layout = null;
   render();
 });
 
 function refreshSilently() {
   if (document.hidden) return;
+  if (!state.layout) return;
   const path = state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches-overview';
   invalidateViewCache(path);
   render({ silent: true });
