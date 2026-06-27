@@ -242,6 +242,7 @@ function navigationItems() {
 function applyCompetitionLayout() {
   const navByView = Object.fromEntries(navigationItems().map((item) => [layoutKeyToView(item.key), item]));
   document.querySelectorAll('.tab').forEach((button) => {
+    if (button.classList.contains('tab--quant')) return; // quant tabs always visible
     const item = navByView[button.dataset.view];
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
