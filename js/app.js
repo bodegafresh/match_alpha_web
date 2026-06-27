@@ -301,7 +301,7 @@ function knockoutStageDefinitions() {
     .map((stage) => ({
       key: stage.stage_code || stage.stage_name,
       title: stage.stage_label || stage.stage_name || stage.stage_code || 'Eliminatoria',
-      count: stage.match_count || stage.rules?.expected_matches || 0,
+      count: stage.expected_match_count || stage.match_count || stage.rules?.expected_matches || 0,
       viewType: stage.view_type || 'BRACKET_ROUND',
     }))
     .filter((stage) => stage.key);
