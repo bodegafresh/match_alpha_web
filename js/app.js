@@ -829,6 +829,529 @@ function placeholderKnockoutCard(stage, index) {
     </article>`;
 }
 
+// ─── Quant adapters ────────────────────────────────────────────────────────
+
+function adaptEVOpportunity(raw) {
+  return {
+    id: raw.betting_decision_id,
+    matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name].filter(Boolean).join(' ') || raw.match_id,
+    kickoffAt: raw.kickoff_at,
+    marketCode: raw.market_code || '',
+    selectionCode: raw.selection_code || '',
+    modelProb: raw.model_probability ?? raw.calibrated_probability ?? raw.raw_probability,
+    marketProb: raw.market_probability ?? raw.market_implied_probability,
+    decimalOdds: raw.decimal_odds,
+    fairOdds: raw.model_probability ? (1 / raw.model_probability) : null,
+    edge: raw.edge,
+    ev: raw.ev,
+    kellyFraction: raw.kelly_fraction,
+    confidenceScore: raw.confidence_score,
+    decisionStatus: raw.decision_status,
+    predictionStatus: raw.prediction_status,
+    blockReasons: Array.isArray(raw.block_reasons) ? raw.block_reasons : (raw.block_reason ? [raw.block_reason] : []),
+    modelName: raw.model_name,
+    modelFamily: raw.model_family,
+    oddsAgeMinutes: raw.odds_age_minutes,
+  };
+}
+
+function adaptBlockedDecision(raw) {
+  return {
+    id: raw.betting_decision_id,
+    matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name].filter(Boolean).join(' ') || raw.match_id,
+    kickoffAt: raw.kickoff_at,
+    marketCode: raw.market_code || '',
+    selectionCode: raw.selection_code || '',
+    decisionStatus: raw.decision_status,
+    blockReasons: Array.isArray(raw.block_reasons) ? raw.block_reasons : (raw.block_reason ? [raw.block_reason] : []),
+    ev: raw.ev,
+    edge: raw.edge,
+    confidenceScore: raw.confidence_score,
+  };
+}
+
+// ─── EV+ view ──────────────────────────────────────────────────────────────
+
+const BLOCK_REASON_LABELS = {
+  NO_CALIBRATION: 'Sin calibración',
+  LOW_CONFIDENCE: 'Confianza baja',
+  ODDS_STALE: 'Odds desactualizadas',
+  LOW_LIQUIDITY: 'Liquidez baja',
+  COMPETITION_NOT_BETTABLE: 'Competencia bloqueada',
+  LEGACY_IMPORT: 'Importación legacy',
+  ODDS_CAPTURED_AFTER_KICKOFF: 'Odds post-kickoff',
+  PAPER_ONLY_BACKFILL: 'Backfill histórico',
+};
+
+const BLOCK_REASON_DESC = {
+  NO_CALIBRATION: 'El modelo aún es RAW_ONLY. Se necesitan 30+ picks settled para calibrar.',
+  LOW_CONFIDENCE: 'El confidence score es menor a 0.30. Más datos de features o calibración mejorarán esto.',
+  ODDS_STALE: 'Las últimas odds capturadas tienen más de 2 horas. Permitido en PAPER_ONLY.',
+  LOW_LIQUIDITY: 'El mercado tiene liquidez baja. No recomendado para apuestas reales.',
+  COMPETITION_NOT_BETTABLE: 'Esta competencia está en modo OBSERVATION, no BETTABLE.',
+  LEGACY_IMPORT: 'Decisión importada de datos históricos. No ejecutable.',
+  ODDS_CAPTURED_AFTER_KICKOFF: 'Las odds fueron capturadas después del inicio del partido.',
+  PAPER_ONLY_BACKFILL: 'Decisión de backfill histórico. Solo para análisis.',
+};
+
+function quantEmptyState(icon, title, text) {
+  return `<div class="quant-empty"><div class="quant-empty__icon">${icon}</div><div class="quant-empty__title">${escapeHtml(title)}</div><div class="quant-empty__text">${escapeHtml(text)}</div></div>`;
+}
+
+function decisionStatusChip(status) {
+  const cfg = {
+    BETTABLE:   ['chip--ok',   'BETTABLE'],
+    PAPER_ONLY: ['chip--warn', 'PAPER'],
+    BLOCKED:    ['chip--muted','BLOQUEADO'],
+    NO_EDGE:    ['chip--muted','SIN EDGE'],
+  };
+  const [cls, label] = cfg[status] || ['chip--muted', escapeHtml(status)];
+  return `<span class="chip ${cls}">${label}</span>`;
+}
+
+function probBars(modelProb, marketProb) {
+  if (modelProb == null && marketProb == null) return '';
+  const mp = Math.round((modelProb ?? 0) * 100);
+  const mkp = Math.round((marketProb ?? 0) * 100);
+  return `
+    <div class="prob-bars">
+      <div class="prob-bar-row">
+        <span class="prob-bar-label">Modelo</span>
+        <div class="prob-bar-track"><div class="prob-bar-fill prob-bar-fill--model" style="width:${mp}%"></div></div>
+        <span class="prob-bar-value">${mp}%</span>
+      </div>
+      <div class="prob-bar-row">
+        <span class="prob-bar-label">Mercado</span>
+        <div class="prob-bar-track"><div class="prob-bar-fill prob-bar-fill--market" style="width:${mkp}%"></div></div>
+        <span class="prob-bar-value">${mkp}%</span>
+      </div>
+    </div>`;
+}
+
+function fmtPct(value) {
+  if (value == null) return '—';
+  return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function fmtNum(value, decimals = 2) {
+  if (value == null) return '—';
+  return Number(value).toFixed(decimals);
+}
+
+function evOpportunityCard(opp) {
+  const cardClass = opp.decisionStatus === 'BETTABLE' ? 'ev-card--bettable'
+    : opp.decisionStatus === 'PAPER_ONLY' ? 'ev-card--paper'
+    : 'ev-card--blocked';
+
+  const marketLabel = [opp.marketCode, opp.selectionCode].filter(Boolean).join(' · ');
+  const kickoff = opp.kickoffAt ? `· ${chileDateTimeLabel(opp.kickoffAt)}` : '';
+  const oddsAge = opp.oddsAgeMinutes != null ? ` · odds hace ${Math.round(opp.oddsAgeMinutes)}min` : '';
+
+  const fairOddsStr = opp.fairOdds ? `cuota justa ${fmtNum(opp.fairOdds)}` : '';
+  const bookOddsStr = opp.decimalOdds ? `libro ${fmtNum(opp.decimalOdds)}` : '';
+
+  return `
+    <article class="ev-card ${cardClass} fade-in">
+      <div class="ev-card-header">
+        <div>
+          <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
+          <div class="ev-match-meta">${escapeHtml(marketLabel)} ${escapeHtml(kickoff)}${escapeHtml(oddsAge)}</div>
+        </div>
+        ${decisionStatusChip(opp.decisionStatus)}
+      </div>
+      ${probBars(opp.modelProb, opp.marketProb)}
+      <div class="ev-metrics-row">
+        ${fairOddsStr ? `<div class="ev-metric-pill"><b>${escapeHtml(fairOddsStr)}</b></div>` : ''}
+        ${bookOddsStr ? `<div class="ev-metric-pill"><b>${escapeHtml(bookOddsStr)}</b></div>` : ''}
+        ${opp.edge != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.edge)}</b><span>edge</span></div>` : ''}
+        ${opp.ev != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.ev)}</b><span>EV</span></div>` : ''}
+        ${opp.kellyFraction != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.kellyFraction)}</b><span>Kelly</span></div>` : ''}
+        ${opp.confidenceScore != null ? `<div class="ev-metric-pill"><b>${fmtNum(opp.confidenceScore)}</b><span>conf</span></div>` : ''}
+      </div>
+      ${opp.blockReasons.length ? `<div class="block-chips">${opp.blockReasons.map((r) => `<span class="chip chip--muted">${escapeHtml(BLOCK_REASON_LABELS[r] || r)}</span>`).join('')}</div>` : ''}
+    </article>`;
+}
+
+function evSummaryBar(opportunities, blocked) {
+  const bettable = opportunities.filter((o) => o.decisionStatus === 'BETTABLE').length;
+  const paper = opportunities.filter((o) => o.decisionStatus === 'PAPER_ONLY').length;
+  const evList = opportunities.map((o) => o.ev).filter((e) => e != null);
+  const avgEV = evList.length ? evList.reduce((a, b) => a + b, 0) / evList.length : null;
+  const kellyList = opportunities.map((o) => o.kellyFraction).filter((k) => k != null);
+  const avgKelly = kellyList.length ? kellyList.reduce((a, b) => a + b, 0) / kellyList.length : null;
+  const confList = opportunities.map((o) => o.confidenceScore).filter((c) => c != null);
+  const avgConf = confList.length ? confList.reduce((a, b) => a + b, 0) / confList.length : null;
+
+  const cards = [
+    { label: 'EV+ activos', value: opportunities.length, cls: opportunities.length ? 'metric-card--blue' : '' },
+    { label: 'Bettable', value: bettable, cls: bettable ? 'metric-card--ok' : '' },
+    { label: 'Paper', value: paper, cls: paper ? 'metric-card--warn' : '' },
+    { label: 'Bloqueados', value: blocked.length, cls: '' },
+    { label: 'EV promedio', value: avgEV != null ? fmtPct(avgEV) : '—', cls: avgEV > 0 ? 'metric-card--ok' : '' },
+    { label: 'Kelly prom.', value: avgKelly != null ? fmtPct(avgKelly) : '—', cls: '' },
+    { label: 'Confianza', value: avgConf != null ? fmtNum(avgConf) : '—', cls: '' },
+  ];
+  return `<div class="ev-summary-bar">${cards.map((c) => `
+    <div class="metric-card ${c.cls}">
+      <div class="metric-card__value">${escapeHtml(String(c.value))}</div>
+      <div class="metric-card__label">${escapeHtml(c.label)}</div>
+    </div>`).join('')}</div>`;
+}
+
+function blockReasonsSection(blocked) {
+  if (!blocked.length) return quantEmptyState('🔒', 'Sin bloqueos activos', 'No hay decisiones bloqueadas en este momento.');
+  const counts = {};
+  blocked.forEach((b) => b.blockReasons.forEach((r) => { counts[r] = (counts[r] || 0) + 1; }));
+  const chips = Object.entries(counts).map(([reason, count]) => `
+    <button class="block-chip-btn" data-reason="${escapeHtml(reason)}" type="button">
+      ${escapeHtml(BLOCK_REASON_LABELS[reason] || reason)}
+      <span class="chip-count">${count}</span>
+    </button>`).join('');
+  return `<div class="block-chips">${chips}</div>`;
+}
+
+let _blockTooltip = null;
+
+function attachBlockChipTooltips(container) {
+  if (!_blockTooltip) {
+    _blockTooltip = document.createElement('div');
+    _blockTooltip.className = 'block-tooltip';
+    document.body.appendChild(_blockTooltip);
+  }
+  const tooltip = _blockTooltip;
+  container.querySelectorAll('.block-chip-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const reason = btn.dataset.reason;
+      const desc = BLOCK_REASON_DESC[reason] || reason;
+      tooltip.innerHTML = `<strong>${escapeHtml(BLOCK_REASON_LABELS[reason] || reason)}</strong>${escapeHtml(desc)}`;
+      const rect = btn.getBoundingClientRect();
+      tooltip.style.top = `${rect.bottom + 6 + window.scrollY}px`;
+      tooltip.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 296))}px`;
+      tooltip.classList.toggle('visible');
+      e.stopPropagation();
+    });
+  });
+  document.addEventListener('click', () => tooltip.classList.remove('visible'), { once: false });
+}
+
+async function renderEV(options = {}) {
+  if (!options.silent) {
+    root.innerHTML = `<div class="ev-view"><div class="loading-head"><span>Cargando EV+</span><i></i></div></div>`;
+  }
+  let rawOpps = [], rawBlocked = [];
+  try {
+    const [oppsData, blockedData] = await Promise.all([
+      cached('ev/opportunities', { limit: 50 }, 60000, options),
+      cached('ev/blocked', { limit: 50 }, 60000, options),
+    ]);
+    rawOpps = oppsData.opportunities || [];
+    rawBlocked = blockedData.blocked || [];
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    root.innerHTML = `<div class="ev-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
+    return;
+  }
+
+  const opportunities = rawOpps.map(adaptEVOpportunity);
+  const blocked = rawBlocked.map(adaptBlockedDecision);
+
+  setStatus('EV+', `${opportunities.length} oportunidades`);
+
+  const positiveEV = opportunities.filter((o) => (o.ev ?? 0) > 0);
+  const negativeEV = opportunities.filter((o) => (o.ev ?? 0) <= 0 && o.decisionStatus !== 'BLOCKED');
+
+  const oppsHtml = positiveEV.length
+    ? `<div class="ev-grid">${positiveEV.map(evOpportunityCard).join('')}</div>`
+    : quantEmptyState('📊', 'Sin oportunidades EV+', 'El pipeline no encontró edge positivo en el mercado actual. Las oportunidades aparecen cuando el modelo ve valor vs las odds del libro.');
+
+  const overpricedHtml = negativeEV.length
+    ? `<div class="ev-grid">${negativeEV.map((o) => evOpportunityCard({ ...o, decisionStatus: 'BLOCKED' })).join('')}</div>`
+    : quantEmptyState('✅', 'Sin mercados sobrepreciados', 'No hay selecciones con EV negativo en este momento.');
+
+  const calibrationNote = positiveEV.length && positiveEV.every((o) => o.predictionStatus === 'RAW_ONLY')
+    ? quantEmptyState('🔬', 'Modelo RAW_ONLY', 'El modelo aún no está calibrado. Se necesitan 30+ picks settled para calibrar. Las oportunidades mostradas son paper-only.')
+    : '';
+
+  root.innerHTML = `
+    <div class="ev-view">
+      ${evSummaryBar(opportunities, blocked)}
+      ${calibrationNote}
+      <section>
+        <div class="ev-section-title">▲ Oportunidades con Edge</div>
+        ${oppsHtml}
+      </section>
+      <section>
+        <div class="ev-section-title">▼ Mercado Sobrepreciado</div>
+        ${overpricedHtml}
+      </section>
+      <section>
+        <div class="ev-section-title">🔒 Razones de Bloqueo</div>
+        ${blockReasonsSection(blocked)}
+      </section>
+    </div>`;
+
+  attachBlockChipTooltips(root);
+}
+
+// ─── Model view ────────────────────────────────────────────────────────────
+
+const FEATURE_HEALTH = [
+  { key: 'elo',       label: 'ELO ratings',         status: 'ok' },
+  { key: 'form',      label: 'Forma reciente',       status: 'ok' },
+  { key: 'odds',      label: 'Odds / Mercado',       status: 'ok' },
+  { key: 'lineups',   label: 'Lineups confirmados',  status: 'pending' },
+  { key: 'weather',   label: 'Clima / Condiciones',  status: 'pending' },
+  { key: 'xg',        label: 'xG histórico',         status: 'pending' },
+  { key: 'news',      label: 'Noticias / Lesiones',  status: 'na' },
+];
+
+function featureHealthGrid() {
+  return `<div class="feature-health-grid">${FEATURE_HEALTH.map((f) => {
+    const dotCls = f.status === 'ok' ? 'health-dot--ok' : f.status === 'partial' ? 'health-dot--partial' : f.status === 'na' ? 'health-dot--na' : 'health-dot--pending';
+    const label = f.status === 'ok' ? 'OK' : f.status === 'partial' ? 'Parcial' : f.status === 'na' ? 'N/A' : 'Pendiente';
+    return `<div class="feature-health-item"><span class="health-dot ${dotCls}"></span><span>${escapeHtml(f.label)}</span><span class="chip chip--muted" style="margin-left:auto;font-size:.62rem">${label}</span></div>`;
+  }).join('')}</div>`;
+}
+
+function feedbackTimeline() {
+  const steps = [
+    { icon: '🎯', label: 'Predicción' },
+    { icon: '⚽', label: 'Partido' },
+    { icon: '📋', label: 'Resultado' },
+    { icon: '💰', label: 'EV real' },
+    { icon: '📈', label: 'CLV' },
+    { icon: '🔬', label: 'Calibración' },
+    { icon: '🧠', label: 'Aprende' },
+  ];
+  return `<div class="feedback-timeline">${steps.map((s, i) => `
+    <div class="tl-step">
+      <div class="tl-dot">${s.icon}</div>
+      <div class="tl-label">${escapeHtml(s.label)}</div>
+    </div>
+    ${i < steps.length - 1 ? '<span class="tl-arrow">→</span>' : ''}`).join('')}</div>`;
+}
+
+function modelStatusCards(diagnostics) {
+  if (!diagnostics.length) return quantEmptyState('🤖', 'Sin modelos registrados', 'El pipeline aún no ha registrado ningún modelo.');
+  const champion = diagnostics.find((d) => d.champion_status === 'CHAMPION') || diagnostics[0];
+  const cards = [
+    { label: 'Modelo activo', value: champion.model_name || '—', cls: 'metric-card--blue' },
+    { label: 'Versión', value: champion.model_version || '—', cls: '' },
+    { label: 'Familia', value: champion.model_family || '—', cls: '' },
+    { label: 'Predicciones', value: champion.prediction_count ?? 0, cls: '' },
+    { label: 'Corridas', value: champion.run_count ?? 0, cls: '' },
+    { label: 'Drift severo', value: champion.severe_drift_reports ?? 0, cls: (champion.severe_drift_reports ?? 0) > 0 ? 'metric-card--danger' : '' },
+  ];
+  return `<div class="metric-grid">${cards.map((c) => `
+    <div class="metric-card ${c.cls}">
+      <div class="metric-card__value">${escapeHtml(String(c.value))}</div>
+      <div class="metric-card__label">${escapeHtml(c.label)}</div>
+    </div>`).join('')}</div>`;
+}
+
+function calibrationSummaryText(calibration) {
+  if (!calibration.length) return quantEmptyState('🔬', 'Sin calibración', 'El modelo aún es RAW_ONLY. Se necesitan 30+ picks settled para calibrar.');
+  const latest = calibration[0];
+  const n = latest.sample_size ?? 0;
+  const lowN = n < 30;
+  return `
+    <div class="cal-summary-row">
+      <span>ECE: <b>${fmtNum(latest.ece, 4)}</b></span>
+      <span>Brier: <b>${fmtNum(latest.brier_score, 4)}</b></span>
+      <span>Método: <b>${escapeHtml(latest.method || '—')}</b></span>
+      <span>n: <b>${n}</b></span>
+    </div>
+    ${lowN ? '<div class="cal-warn">⚠️ Datos insuficientes — calibration chart disponible en Stats cuando n ≥ 30</div>' : ''}
+    <p style="font-size:.78rem;color:var(--muted);margin:.6rem 0 0">Si el modelo dice 40%, debería ocurrir ~40% de las veces (ver Stats para gráfico completo)</p>`;
+}
+
+async function renderModel(options = {}) {
+  if (!options.silent) {
+    root.innerHTML = `<div class="model-view"><div class="loading-head"><span>Cargando Modelo</span><i></i></div></div>`;
+  }
+  let diagnostics = [], calibration = [];
+  try {
+    const [diagData, calData] = await Promise.all([
+      cached('model/diagnostics', {}, 120000, options),
+      cached('calibration/summary', { limit: 5 }, 120000, options),
+    ]);
+    diagnostics = diagData.models || [];
+    calibration = calData.calibration || [];
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    root.innerHTML = `<div class="model-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
+    return;
+  }
+
+  setStatus('Modelo', `${diagnostics.length} modelos`);
+
+  root.innerHTML = `
+    <div class="model-view">
+      <section class="model-section">
+        <h3>Estado del Modelo</h3>
+        ${modelStatusCards(diagnostics)}
+      </section>
+      <section class="model-section">
+        <h3>Calibración</h3>
+        ${calibrationSummaryText(calibration)}
+      </section>
+      <section class="model-section">
+        <h3>Feature Health</h3>
+        ${featureHealthGrid()}
+      </section>
+      <section class="model-section">
+        <h3>Feedback Loop</h3>
+        <p style="font-size:.78rem;color:var(--muted);margin:0 0 .8rem">Así aprende el sistema de cada partido:</p>
+        ${feedbackTimeline()}
+      </section>
+    </div>`;
+}
+
+// ─── Stats view ─────────────────────────────────────────────────────────────
+
+function destroyChart(id) {
+  const existing = Chart.getChart(id);
+  if (existing) existing.destroy();
+}
+
+function calibrationBucketChart(calibrationData) {
+  const id = 'cal-bucket-chart';
+  const bins = Array.from({ length: 10 }, (_, i) => `${i * 10}-${i * 10 + 10}%`);
+  if (!calibrationData.length) return `<div class="chart-wrap">${quantEmptyState('📊', 'Sin datos de calibración', 'Se necesitan 30+ picks settled.')}</div>`;
+  return `
+    <div class="chart-wrap">
+      <canvas id="${id}"></canvas>
+    </div>
+    <p style="font-size:.74rem;color:var(--muted);margin:.4rem 0 0">Barras = tasa observada. Línea = predicha. La diagonal perfecta = calibración ideal.</p>`;
+}
+
+function initCalibrationChart(calibrationData) {
+  destroyChart('cal-bucket-chart');
+  const canvas = document.getElementById('cal-bucket-chart');
+  if (!canvas || !calibrationData.length || typeof Chart === 'undefined') return;
+  const bins = Array.from({ length: 10 }, (_, i) => `${i * 10}-${i * 10 + 10}%`);
+  const predicted = bins.map((_, i) => (i * 10 + 5) / 100);
+  const observed = bins.map(() => null);
+  new Chart(canvas, {
+    data: {
+      labels: bins,
+      datasets: [
+        { type: 'bar', label: 'Tasa observada', data: observed, backgroundColor: 'rgba(53,194,255,.45)', borderColor: 'rgba(53,194,255,.8)', borderWidth: 1 },
+        { type: 'line', label: 'Calibración perfecta', data: predicted, borderColor: 'rgba(244,197,66,.8)', borderDash: [4, 4], borderWidth: 2, pointRadius: 0, fill: false },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#9fb0c3', font: { size: 11 } } } }, scales: { y: { min: 0, max: 1, ticks: { color: '#9fb0c3', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.06)' } }, x: { ticks: { color: '#9fb0c3', font: { size: 9 } }, grid: { display: false } } } },
+  });
+}
+
+function roiByEvChart(buckets) {
+  const id = 'roi-ev-chart';
+  if (!buckets.length) return `<div class="chart-wrap">${quantEmptyState('📊', 'Sin datos', 'Se necesitan picks settled para calcular ROI por EV.')}</div>`;
+  return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
+}
+
+function initRoiChart(buckets) {
+  destroyChart('roi-ev-chart');
+  const canvas = document.getElementById('roi-ev-chart');
+  if (!canvas || !buckets.length || typeof Chart === 'undefined') return;
+  const labels = buckets.map((b) => b.ev_bucket);
+  const roiData = buckets.map((b) => b.roi_pct ?? 0);
+  const colors = roiData.map((v) => v >= 0 ? 'rgba(30,215,96,.6)' : 'rgba(255,99,117,.6)');
+  new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'ROI %', data: roiData, backgroundColor: colors, borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { color: '#9fb0c3', font: { size: 10 }, callback: (v) => `${v}%` }, grid: { color: 'rgba(255,255,255,.06)' } }, x: { ticks: { color: '#9fb0c3', font: { size: 10 } }, grid: { display: false } } } },
+  });
+}
+
+function picksByStatusChart(decisions) {
+  const id = 'picks-donut-chart';
+  const counts = decisions.reduce((acc, d) => { acc[d.decision_status] = (acc[d.decision_status] || 0) + 1; return acc; }, {});
+  if (!Object.keys(counts).length) return `<div class="chart-wrap">${quantEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.')}</div>`;
+  return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
+}
+
+function initPicksDonut(decisions) {
+  destroyChart('picks-donut-chart');
+  const canvas = document.getElementById('picks-donut-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const counts = decisions.reduce((acc, d) => { acc[d.decision_status] = (acc[d.decision_status] || 0) + 1; return acc; }, {});
+  const STATUS_COLORS = { BETTABLE: '#1ed760', PAPER_ONLY: '#f4c542', NO_EDGE: '#6f8399', BLOCKED: '#3d4f61' };
+  const labels = Object.keys(counts);
+  new Chart(canvas, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: labels.map((l) => counts[l]), backgroundColor: labels.map((l) => STATUS_COLORS[l] || '#3d4f61'), borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#9fb0c3', font: { size: 11 }, padding: 12 } } } },
+  });
+}
+
+function statsKpiBar(calibration, buckets) {
+  const latest = calibration[0] || {};
+  const totalROI = buckets.length ? buckets.reduce((s, b) => s + (b.roi_pct ?? 0) * (b.settled_count ?? 0), 0) / Math.max(1, buckets.reduce((s, b) => s + (b.settled_count ?? 0), 0)) : null;
+  const cards = [
+    { label: 'Brier Score', value: fmtNum(latest.brier_score, 4), cls: '' },
+    { label: 'Log Loss', value: fmtNum(latest.log_loss, 4), cls: '' },
+    { label: 'ECE', value: fmtNum(latest.ece, 4), cls: '' },
+    { label: 'ROI prom.', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
+    { label: 'Picks n', value: latest.sample_size ?? 0, cls: '' },
+  ];
+  return `<div class="kpi-bar">${cards.map((c) => `
+    <div class="metric-card ${c.cls}">
+      <div class="metric-card__value">${escapeHtml(String(c.value))}</div>
+      <div class="metric-card__label">${escapeHtml(c.label)}</div>
+    </div>`).join('')}</div>`;
+}
+
+async function renderStats(options = {}) {
+  if (!options.silent) {
+    root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando Stats</span><i></i></div></div>`;
+  }
+  let calibration = [], buckets = [], decisions = [];
+  try {
+    const [calData, roiData, bankData] = await Promise.all([
+      cached('calibration/summary', { limit: 5 }, 120000, options),
+      cached('stats/roi-by-ev', {}, 120000, options),
+      cached('stats/bankroll', { limit: 200 }, 120000, options),
+    ]);
+    calibration = calData.calibration || [];
+    buckets = roiData.buckets || [];
+    decisions = bankData.decisions || [];
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    root.innerHTML = `<div class="stats-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
+    return;
+  }
+
+  setStatus('Stats', `${decisions.length} picks`);
+
+  root.innerHTML = `
+    <div class="stats-view">
+      <section class="stats-section">
+        <h3>KPIs del Modelo</h3>
+        ${statsKpiBar(calibration, buckets)}
+      </section>
+      <section class="stats-section">
+        <h3>Calibración (bucket chart)</h3>
+        ${calibrationBucketChart(calibration)}
+      </section>
+      <section class="stats-section">
+        <h3>ROI por Rango de EV</h3>
+        ${roiByEvChart(buckets)}
+      </section>
+      <section class="stats-section">
+        <h3>Picks por Estado</h3>
+        ${picksByStatusChart(decisions)}
+      </section>
+    </div>`;
+
+  // Init charts after DOM painted
+  setTimeout(() => {
+    initCalibrationChart(calibration);
+    initRoiChart(buckets);
+    initPicksDonut(decisions);
+  }, 0);
+}
+
 async function render(options = {}) {
   const seq = ++state.renderSeq;
   if (state.activeController) state.activeController.abort();
@@ -840,6 +1363,9 @@ async function render(options = {}) {
     if (state.view === 'standings') await renderStandings(renderOptions);
     else if (state.view === 'teams') await renderTeams(renderOptions);
     else if (state.view === 'knockout') await renderKnockout(renderOptions);
+    else if (state.view === 'ev') await renderEV(renderOptions);
+    else if (state.view === 'model') await renderModel(renderOptions);
+    else if (state.view === 'stats') await renderStats(renderOptions);
     else await renderToday(renderOptions);
   } catch (error) {
     if (error.name === 'AbortError' || seq !== state.renderSeq) return;
@@ -866,7 +1392,8 @@ $('#refresh-btn').addEventListener('click', () => {
 function refreshSilently() {
   if (document.hidden) return;
   if (!state.layout) return;
-  const path = state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches-overview';
+  const quantPaths = { ev: 'ev/opportunities', model: 'model/diagnostics', stats: 'calibration/summary' };
+  const path = quantPaths[state.view] || (state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches-overview');
   invalidateViewCache(path);
   render({ silent: true });
 }

@@ -982,3 +982,222 @@ tbody tr:hover { background: rgba(255, 255, 255, .035); }
     font-size: .82rem;
   }
 }
+
+/* ─── Quant tabs accent ─────────────────────────────────────────────── */
+.tab--quant { border-color: rgba(53, 194, 255, .28); }
+.tab--quant.active {
+  background: linear-gradient(180deg, #55d8ff, var(--accent-2));
+  border-color: rgba(53, 194, 255, .9);
+  box-shadow: 0 12px 30px rgba(53, 194, 255, .18);
+}
+
+/* ─── Chips / badges ─────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .22rem .62rem;
+  border-radius: 100px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.chip--ok     { background: rgba(30, 215, 96, .14);  color: var(--ok);     border-color: rgba(30, 215, 96, .25); }
+.chip--warn   { background: rgba(244, 197, 66, .14); color: var(--warn);   border-color: rgba(244, 197, 66, .28); }
+.chip--blue   { background: rgba(53, 194, 255, .13); color: var(--accent-2); border-color: rgba(53, 194, 255, .25); }
+.chip--danger { background: rgba(255, 99, 117, .14); color: var(--danger); border-color: rgba(255, 99, 117, .25); }
+.chip--muted  { background: rgba(111, 131, 153, .16); color: var(--faint); border-color: rgba(111, 131, 153, .22); }
+
+/* ─── EV cards ───────────────────────────────────────────────────────── */
+.ev-card {
+  display: grid;
+  gap: .75rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--panel);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
+}
+.ev-card:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,.28); }
+.ev-card--bettable  { border-left-color: var(--ok); }
+.ev-card--paper     { border-left-color: var(--accent); }
+.ev-card--blocked   { border-left-color: var(--faint); opacity: .72; }
+.ev-card--overpriced { border-left-color: var(--danger); }
+
+.ev-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.ev-match-label { font-size: .82rem; font-weight: 700; color: var(--text); }
+.ev-match-meta  { font-size: .72rem; color: var(--muted); margin-top: .15rem; }
+
+/* ─── Probability bars ───────────────────────────────────────────────── */
+.prob-bars { display: grid; gap: .35rem; }
+.prob-bar-row { display: flex; align-items: center; gap: .6rem; font-size: .74rem; }
+.prob-bar-label { width: 52px; color: var(--muted); flex-shrink: 0; }
+.prob-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--line);
+  border-radius: 100px;
+  overflow: hidden;
+  position: relative;
+}
+.prob-bar-fill {
+  height: 100%;
+  border-radius: 100px;
+  transition: width .4s var(--ease);
+}
+.prob-bar-fill--model   { background: var(--accent-2); }
+.prob-bar-fill--market  { background: var(--faint); }
+.prob-bar-value { width: 38px; text-align: right; color: var(--text); font-weight: 600; font-size: .74rem; }
+
+/* ─── Metric grid ────────────────────────────────────────────────────── */
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .65rem; }
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: .9rem 1rem;
+}
+.metric-card__value { font-size: 1.6rem; font-weight: 800; line-height: 1; color: var(--text); }
+.metric-card__label { color: var(--muted); font-size: .7rem; margin-top: .3rem; text-transform: uppercase; letter-spacing: .04em; }
+.metric-card--ok     .metric-card__value { color: var(--ok); }
+.metric-card--warn   .metric-card__value { color: var(--warn); }
+.metric-card--blue   .metric-card__value { color: var(--accent-2); }
+.metric-card--danger .metric-card__value { color: var(--danger); }
+
+/* ─── EV summary bar ─────────────────────────────────────────────────── */
+.ev-summary-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .65rem; margin-bottom: 1.2rem; }
+
+/* ─── Block reasons chips list ───────────────────────────────────────── */
+.block-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+.block-chip-btn {
+  background: none;
+  border: 1px solid rgba(111,131,153,.28);
+  border-radius: 100px;
+  color: var(--faint);
+  font-size: .72rem;
+  font-weight: 700;
+  padding: .28rem .72rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  transition: border-color 150ms, color 150ms, background 150ms;
+}
+.block-chip-btn:hover { border-color: var(--accent-2); color: var(--accent-2); background: rgba(53,194,255,.08); }
+.block-chip-btn .chip-count {
+  background: rgba(111,131,153,.22);
+  border-radius: 100px;
+  padding: .05rem .4rem;
+  font-size: .68rem;
+}
+
+/* ─── Inline tooltip ─────────────────────────────────────────────────── */
+.block-tooltip {
+  display: none;
+  position: fixed;
+  z-index: 100;
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: .7rem .9rem;
+  max-width: 280px;
+  font-size: .8rem;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+.block-tooltip.visible { display: block; }
+.block-tooltip strong { color: var(--accent-2); display: block; margin-bottom: .25rem; }
+
+/* ─── EV view layout ─────────────────────────────────────────────────── */
+.ev-view { display: grid; gap: 1.4rem; }
+.ev-section-title {
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: .6rem;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.ev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .85rem; }
+.ev-metrics-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+.ev-metric-pill {
+  display: flex;
+  gap: .4rem;
+  align-items: baseline;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: .42rem .75rem;
+}
+.ev-metric-pill b { font-size: 1rem; font-weight: 800; }
+.ev-metric-pill span { font-size: .7rem; color: var(--muted); }
+
+/* ─── Empty state quant ──────────────────────────────────────────────── */
+.quant-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--muted);
+}
+.quant-empty__icon { font-size: 2.4rem; opacity: .6; }
+.quant-empty__title { font-size: .95rem; font-weight: 700; color: var(--text); }
+.quant-empty__text { font-size: .82rem; max-width: 320px; }
+
+/* ─── Chart containers ───────────────────────────────────────────────── */
+.chart-wrap { position: relative; height: 220px; margin: .4rem 0; }
+.chart-wrap canvas { max-height: 220px; }
+
+/* ─── Feature health ─────────────────────────────────────────────────── */
+.feature-health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; }
+.feature-health-item { display: flex; align-items: center; gap: .6rem; font-size: .82rem; padding: .4rem 0; }
+.health-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.health-dot--ok      { background: var(--ok); box-shadow: 0 0 6px rgba(30,215,96,.5); }
+.health-dot--partial { background: var(--warn); }
+.health-dot--pending { background: var(--faint); }
+.health-dot--na      { background: var(--line-strong); }
+
+/* ─── Feedback timeline ──────────────────────────────────────────────── */
+.feedback-timeline { display: flex; align-items: center; flex-wrap: wrap; gap: 0; padding: .5rem 0; }
+.tl-step { display: flex; flex-direction: column; align-items: center; gap: .3rem; }
+.tl-dot {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: rgba(53,194,255,.14);
+  border: 2px solid rgba(53,194,255,.4);
+  display: grid; place-items: center;
+  font-size: .9rem;
+}
+.tl-label { font-size: .62rem; color: var(--muted); text-align: center; max-width: 56px; }
+.tl-arrow { color: var(--faint); font-size: .8rem; padding: 0 .2rem; align-self: flex-start; margin-top: .6rem; }
+
+/* ─── Model view sections ────────────────────────────────────────────── */
+.model-view { display: grid; gap: 1.4rem; }
+.model-section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1.1rem 1.25rem; }
+.model-section h3 { margin: 0 0 .8rem; font-size: .88rem; font-weight: 800; color: var(--text); }
+.cal-summary-row { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: .84rem; }
+.cal-summary-row b { color: var(--accent-2); }
+.cal-warn { display: inline-flex; align-items: center; gap: .4rem; background: rgba(244,197,66,.1); border: 1px solid rgba(244,197,66,.25); border-radius: 8px; padding: .35rem .75rem; font-size: .78rem; color: var(--warn); margin-top: .5rem; }
+
+/* ─── Stats view ─────────────────────────────────────────────────────── */
+.stats-view { display: grid; gap: 1.4rem; }
+.stats-section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1.1rem 1.25rem; }
+.stats-section h3 { margin: 0 0 .8rem; font-size: .88rem; font-weight: 800; }
+.kpi-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .6rem; }
+
+/* ─── Responsive: mobile nav scroll already handled by .tabs ─────────── */
+@media (max-width: 500px) {
+  .ev-grid { grid-template-columns: 1fr; }
+  .feature-health-grid { grid-template-columns: 1fr; }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+}
