@@ -1,6 +1,6 @@
 const CFG = window.MATCH_ALPHA_CONFIG || {};
 const API_BASE_URL = String(CFG.API_BASE_URL || '').replace(/\/+$/, '');
-const SEASON = CFG.DEFAULT_SEASON || 'wc2026';
+const SEASON = new URLSearchParams(location.search).get('season') || CFG.DEFAULT_SEASON || 'wc2026';
 const KEY_STORAGE = CFG.KEY_STORAGE || 'match_alpha_web_key';
 const AUTO_REFRESH_MS = Number(CFG.AUTO_REFRESH_MS || 30000);
 const CHILE_TIMEZONE = 'America/Santiago';
@@ -14,7 +14,7 @@ const state = {
   layout: null,
   renderSeq: 0,
   activeController: null,
-  knockoutStage: 'ROUND_OF_32',
+  knockoutStage: null,
 };
 
 const dateModes = [
@@ -24,7 +24,8 @@ const dateModes = [
   ['upcoming', 'Próximos', '⌁'],
 ];
 
-const knockoutStages = [
+// Emergency fallback only — real definitions come from layout API
+const _FALLBACK_KNOCKOUT_STAGES = [
   { key: 'ROUND_OF_32', title: 'Dieciseisavos', count: 16 },
   { key: 'ROUND_OF_16', title: 'Octavos', count: 8 },
   { key: 'QUARTER_FINAL', title: 'Cuartos', count: 4 },
@@ -166,15 +167,22 @@ function matchGroupLabel(match) {
 
 function knockoutStageKey(match) {
   const stages = knockoutStageDefinitions();
-  if (stages.some((stage) => stage.key === match.stage_code)) return match.stage_code;
+  // Prefer exact match against layout stage keys
+  if (match.stage_code && stages.some((s) => s.key === match.stage_code)) return match.stage_code;
+  // Then try stage_name
+  if (match.stage_name && stages.some((s) => s.key === match.stage_name)) return match.stage_name;
+  // Fallback: fuzzy keyword matching (WC-specific but safe as last resort)
   const raw = `${match.stage_code || ''} ${match.stage_name || ''} ${match.stage_label || ''}`.toUpperCase();
+  for (const s of stages) {
+    if (raw.includes(s.key)) return s.key;
+  }
   if (raw.includes('32') || raw.includes('DIECISEIS')) return 'ROUND_OF_32';
   if (raw.includes('16') || raw.includes('OCTAV')) return 'ROUND_OF_16';
   if (raw.includes('QUARTER') || raw.includes('CUART')) return 'QUARTER_FINAL';
   if (raw.includes('SEMI')) return 'SEMI_FINAL';
   if (raw.includes('THIRD') || raw.includes('TERCER')) return 'THIRD_PLACE';
   if (raw.includes('FINAL')) return 'FINAL';
-  return match.stage_code || match.stage_name || 'KNOCKOUT';
+  return match.stage_code || match.stage_name || stages[0]?.key || 'KNOCKOUT';
 }
 
 function teamFlag(team) {
@@ -211,7 +219,7 @@ function fallbackLayout() {
         { key: 'bracket', label: 'Eliminatorias', enabled: true, order: 40 },
       ],
     },
-    stages: knockoutStages.map((stage, index) => ({
+    stages: _FALLBACK_KNOCKOUT_STAGES.map((stage, index) => ({
       stage_code: stage.key,
       stage_label: stage.title,
       stage_order: index + 1,
@@ -239,6 +247,27 @@ function navigationItems() {
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 }
 
+function competitionLabel() {
+  return state.layout?.name
+    || state.layout?.competition?.display_name
+    || state.layout?.competition_name
+    || SEASON;
+}
+
+function stageDefinitionsByViewType(viewType) {
+  const vt = String(viewType).toUpperCase();
+  return (state.layout?.stages || [])
+    .filter((s) => String(s.view_type || '').toUpperCase() === vt)
+    .sort((a, b) => (a.stage_order || 0) - (b.stage_order || 0))
+    .map((s) => ({
+      key: s.stage_code || s.stage_name,
+      title: s.stage_label || s.stage_name || s.stage_code,
+      count: s.match_count || 0,
+      viewType: s.view_type,
+    }))
+    .filter((s) => s.key);
+}
+
 function applyCompetitionLayout() {
   const navByView = Object.fromEntries(navigationItems().map((item) => [layoutKeyToView(item.key), item]));
   document.querySelectorAll('.tab').forEach((button) => {
@@ -252,9 +281,13 @@ function applyCompetitionLayout() {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
-  // Competition name from layout (supports multi-competition)
-  const compName = state.layout?.competition_name || state.layout?.ui?.competition_name;
-  if (compName) {
+  // Set initial knockout stage from first bracket stage in layout
+  if (!state.knockoutStage) {
+    state.knockoutStage = knockoutStageDefinitions()[0]?.key || null;
+  }
+  // Competition name from layout
+  const compName = competitionLabel();
+  if (compName && compName !== SEASON) {
     const brandEl = document.querySelector('.brand p');
     if (brandEl && brandEl.textContent !== compName) brandEl.textContent = compName;
   }
@@ -272,7 +305,7 @@ function knockoutStageDefinitions() {
       viewType: stage.view_type || 'BRACKET_ROUND',
     }))
     .filter((stage) => stage.key);
-  return stages.length ? stages : knockoutStages;
+  return stages.length ? stages : _FALLBACK_KNOCKOUT_STAGES;
 }
 
 async function apiGet(path, params = {}, options = {}) {
@@ -586,12 +619,15 @@ async function renderToday(options = {}) {
 
 async function renderStandings(options = {}) {
   if (!options.silent) loading('Posiciones');
+  await ensureLayout();
   const data = await cached('web/standings', {}, 90000, options);
   const groups = data.groups || [];
-  setStatus('Tabla de posiciones', `${groups.length} grupos`);
+  const isLeague = state.layout?.capabilities?.has_league_table && !state.layout?.capabilities?.has_groups;
+  const statusLabel = isLeague ? `${groups[0]?.standings?.length ?? 0} equipos` : `${groups.length} grupos`;
+  setStatus('Posiciones', statusLabel);
   root.innerHTML = groups.map((group) => `
     <section class="group-block fade-in">
-      <h2 class="section-title">${escapeHtml(groupLabel(group.group_name))}</h2>
+      ${isLeague ? '' : `<h2 class="section-title">${escapeHtml(groupLabel(group.group_name))}</h2>`}
       <div class="card table-card">
         <table>
           <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
@@ -696,12 +732,12 @@ function teamModalHtml(detail) {
         </div>
       </header>
       <section class="modal-section">
-        <h3>Resultados Mundial 2026</h3>
+        <h3>Resultados ${escapeHtml(competitionLabel())}</h3>
         <div class="team-results">${matches.map(teamResultRow).join('') || emptyState('No hay partidos publicados para este equipo.')}</div>
       </section>
       <div class="modal-tabs">
         <button class="active" data-modal-tab="roster">Plantel</button>
-        <button data-modal-tab="stats">Stats WC</button>
+        <button data-modal-tab="stats">Stats</button>
       </div>
       <section data-modal-panel="roster">${rosterGrid(roster)}</section>
       <section data-modal-panel="stats" hidden>${rosterStatsTable(roster)}</section>
@@ -757,6 +793,7 @@ function rosterStatsTable(roster) {
 
 async function renderKnockout(options = {}) {
   if (!options.silent) loading('Eliminatorias');
+  await ensureLayout();
   const stages = knockoutStageDefinitions();
   const data = await cached('web/knockout', {}, 90000, options);
   const matches = data.matches || [];
@@ -766,8 +803,9 @@ async function renderKnockout(options = {}) {
     (acc[key] ||= []).push(match);
     return acc;
   }, {});
-  if (!byStage[state.knockoutStage]) {
-    state.knockoutStage = stages.find((stage) => byStage[stage.key]?.length)?.key || stages[0]?.key || 'KNOCKOUT';
+  // Init or re-anchor knockoutStage to a stage that has data
+  if (!state.knockoutStage || !byStage[state.knockoutStage]) {
+    state.knockoutStage = stages.find((s) => byStage[s.key]?.length)?.key || stages[0]?.key || null;
   }
   const active = stages.find((stage) => stage.key === state.knockoutStage) || stages[0];
   const activeMatches = byStage[active.key] || [];
