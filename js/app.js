@@ -270,14 +270,16 @@ function stageDefinitionsByViewType(viewType) {
 
 function applyCompetitionLayout() {
   const navByView = Object.fromEntries(navigationItems().map((item) => [layoutKeyToView(item.key), item]));
+  const ALWAYS_VISIBLE = new Set(['ev', 'model', 'stats', 'news']);
   document.querySelectorAll('.tab').forEach((button) => {
     if (button.classList.contains('tab--quant')) return; // quant tabs always visible
+    if (ALWAYS_VISIBLE.has(button.dataset.view)) return;  // extra always-visible tabs
     const item = navByView[button.dataset.view];
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
   });
   const QUANT_VIEWS = new Set(['ev', 'model', 'stats']);
-  if (!navByView[state.view] && !QUANT_VIEWS.has(state.view)) {
+  if (!navByView[state.view] && !QUANT_VIEWS.has(state.view) && state.view !== 'news') {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
@@ -1650,6 +1652,73 @@ async function renderStats(options = {}) {
   }, 0);
 }
 
+// ─── News view ───────────────────────────────────────────────────────────────
+
+function newsArticleCard(article) {
+  const title = escapeHtml(article.title || '');
+  const source = escapeHtml(article.source || '');
+  const url = article.url || '#';
+  const pub = article.published_at ? timeLabel(article.published_at) : '';
+  return `<a class="news-article" href="${url}" target="_blank" rel="noopener noreferrer">
+    <span class="news-article__title">${title}</span>
+    <span class="news-article__meta">${source}${pub ? ` · ${pub}` : ''}</span>
+  </a>`;
+}
+
+function newsMatchBlock(item) {
+  const home = escapeHtml(item.home_team || '');
+  const away = escapeHtml(item.away_team || '');
+  const kickoff = item.kickoff_at ? timeLabel(item.kickoff_at) : '';
+  const aiChip = item.ai_context_used
+    ? `<span class="chip chip--ai" title="La IA usó noticias para ajustar este pronóstico">IA activa</span>`
+    : `<span class="chip chip--muted">Sin ajuste IA</span>`;
+  const articles = item.combined_news || [];
+  const articlesHtml = articles.length
+    ? articles.map(newsArticleCard).join('')
+    : `<p class="news-empty">No se encontraron noticias recientes.</p>`;
+
+  return `<section class="news-match-block fade-in">
+    <div class="news-match-header">
+      <span class="news-match-teams">${home} <span class="news-vs">vs</span> ${away}</span>
+      <div class="news-match-meta">
+        <span class="chip chip--muted">${escapeHtml(kickoff)}</span>
+        ${aiChip}
+      </div>
+    </div>
+    <div class="news-articles">${articlesHtml}</div>
+  </section>`;
+}
+
+async function renderNews(options = {}) {
+  root.innerHTML = skeletonCards(3);
+  let data;
+  try {
+    const resp = await apiGet('web/news', {}, options.signal);
+    data = resp?.data;
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    root.innerHTML = `<div class="quant-empty"><p>No se pudieron cargar las noticias.</p></div>`;
+    return;
+  }
+
+  const items = data?.matches_news || [];
+  if (!items.length) {
+    root.innerHTML = `<div class="quant-empty">
+      <p>No hay partidos hoy para mostrar noticias.</p>
+    </div>`;
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="news-view">
+      <div class="news-header">
+        <h2 class="section-title">Noticias del día</h2>
+        <p class="news-subtitle">Noticias relacionadas a los equipos con partidos hoy · Las marcadas con <strong>IA activa</strong> fueron usadas por el modelo para ajustar pronósticos.</p>
+      </div>
+      ${items.map(newsMatchBlock).join('')}
+    </div>`;
+}
+
 async function render(options = {}) {
   const seq = ++state.renderSeq;
   if (state.activeController) state.activeController.abort();
@@ -1664,6 +1733,7 @@ async function render(options = {}) {
     else if (state.view === 'ev') { hideDateFilterBar(); await renderEV(renderOptions); }
     else if (state.view === 'model') { hideDateFilterBar(); await renderModel(renderOptions); }
     else if (state.view === 'stats') { hideDateFilterBar(); await renderStats(renderOptions); }
+    else if (state.view === 'news') { hideDateFilterBar(); await renderNews(renderOptions); }
     else await renderToday(renderOptions);
   } catch (error) {
     if (error.name === 'AbortError' || seq !== state.renderSeq) return;

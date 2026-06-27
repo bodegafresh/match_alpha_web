@@ -903,6 +903,47 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .chip--blue   { background: rgba(46, 196, 247, .11); color: var(--accent-2); border-color: rgba(46, 196, 247, .22); }
 .chip--danger { background: rgba(240, 79, 101, .12); color: var(--danger); border-color: rgba(240, 79, 101, .22); }
 .chip--muted  { background: rgba(86, 113, 138, .14); color: var(--faint);  border-color: rgba(86, 113, 138, .2); }
+.chip--ai     { background: rgba(167,139,250,.13);   color: var(--ai);      border-color: rgba(167,139,250,.28); }
+
+/* ═══════ News view ═══════ */
+.news-view { display: flex; flex-direction: column; gap: 20px; }
+.news-header { margin-bottom: 4px; }
+.news-subtitle { color: var(--muted); font-size: .82rem; margin-top: 4px; line-height: 1.5; }
+
+.news-match-block {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+}
+.news-match-header {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.news-match-teams { font-size: 1rem; font-weight: 700; color: var(--text); }
+.news-vs { color: var(--muted); font-weight: 400; margin: 0 6px; }
+.news-match-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.news-articles { display: flex; flex-direction: column; gap: 8px; }
+.news-article {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  text-decoration: none;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.news-article:hover { border-color: var(--line-2); background: var(--surface-3); }
+.news-article__title { color: var(--text); font-size: .85rem; font-weight: 500; line-height: 1.4; }
+.news-article__meta  { color: var(--faint); font-size: .72rem; }
+.news-empty { color: var(--muted); font-size: .82rem; padding: 8px 0; }
+
+@media (max-width: 600px) {
+  .news-match-header { flex-direction: column; align-items: flex-start; }
+  .news-match-teams { font-size: .9rem; }
+}
 
 /* ═══════ Animations ═══════ */
 @keyframes spin        { to { transform: rotate(360deg); } }
