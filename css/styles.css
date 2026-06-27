@@ -1352,3 +1352,24 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 @media (max-width: 400px) {
   .ev-summary-bar { grid-template-columns: 1fr; }
 }
+
+/* ═══════ Print / PDF Capture ═══════ */
+
+@media print {
+  :root {
+    --bg: #fff; --bg-2: #f5f7fa; --bg-3: #eef2f7;
+    --panel: #fff; --panel-2: #f5f7fa;
+    --surface-1: #fff; --surface-2: #f0f4f8; --surface-3: #e8edf3;
+    --text: #111; --muted: #555; --faint: #888;
+    --line: rgba(0,0,0,.12); --line-2: rgba(0,0,0,.18);
+  }
+  body { background: #fff !important; color: #111 !important; }
+  .topbar, .tabs { background: #fff !important; border-color: #ddd !important; }
+  .card, .bracket-card, .match-card, .ev-card, .metric-card { background: #fff !important; border-color: #ddd !important; box-shadow: none !important; }
+  .bracket-team strong, .bracket-node-name, .team-name, .match-time { color: #111 !important; }
+  .muted, .faint, [style*="color:var(--muted)"], [style*="color:var(--faint)"] { color: #666 !important; }
+  .knockout-view { display: block !important; }
+  .knockout-mobile-view { display: block !important; page-break-inside: avoid; }
+  .knockout-nav-btn, .knockout-progress, .knockout-tabs { display: none !important; }
+  .knockout-list { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 12px !important; }
+}
