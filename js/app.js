@@ -1022,8 +1022,11 @@ function bracketNodeCard(match) {
   const hasScore = match.home_score != null && match.away_score != null;
   const homeWin = hasScore && match.home_score > match.away_score;
   const awayWin = hasScore && match.away_score > match.home_score;
+  const dateStr = match.kickoff_at ? dateLabel(match.kickoff_at).toLowerCase() : '';
+  const timeStr = match.kickoff_at ? timeLabel(match.kickoff_at) : '';
   return `
     <div class="bracket-node${isLive ? ' bracket-node--live' : ''}">
+      ${dateStr ? `<div class="bracket-node-date">${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} CL</div>` : ''}
       <div class="bracket-node-team${homeWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(match.home)}</span>
         <span class="bracket-node-name">${escapeHtml(match.home?.display_name || match.home?.slot_label || '?')}</span>
