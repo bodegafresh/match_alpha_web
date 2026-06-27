@@ -457,6 +457,30 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .stat b { display: block; color: var(--text); font-weight: 700; font-size: .9rem; }
 .stat span { display: block; color: var(--faint); font-size: .66rem; margin-top: .12rem; text-transform: uppercase; letter-spacing: .04em; }
 
+/* ═══════ ITEM 1: Kickoff block grouping ═══════ */
+.kickoff-block { margin-bottom: var(--sp-6); }
+.kickoff-block:last-child { margin-bottom: 0; }
+.kickoff-header {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) 0 var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--sp-4);
+}
+.kickoff-time {
+  font-size: 0.85rem; font-weight: 800;
+  color: var(--accent-2); letter-spacing: 0.04em;
+}
+.kickoff-meta {
+  font-size: 0.72rem; color: var(--muted); font-weight: 600;
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+.live-badge {
+  display: inline-block; padding: 2px 6px;
+  background: rgba(240, 79, 101, .15); color: var(--live);
+  border-radius: 4px; font-size: 0.63rem; font-weight: 800;
+  letter-spacing: 0.06em; animation: pulse-live 2s ease-in-out infinite;
+}
+
 /* ═══════ Knockout bracket ═══════ */
 .knockout-view { display: grid; gap: .9rem; touch-action: pan-y; }
 .knockout-view.swipe-left  .knockout-column { animation: swipeLeft  180ms var(--ease) both; }
@@ -557,6 +581,141 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 }
 .bracket-vs .score { min-width: 0; font-size: 1.2rem; letter-spacing: -.01em; }
 .venue.compact { text-align: left; font-size: .74rem; }
+
+/* ═══════ ITEM 2: Desktop bracket tree ═══════ */
+.bracket-tree-wrap { display: none; }
+
+.bracket-tree {
+  overflow-x: auto; padding: var(--sp-4) 0 var(--sp-6);
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+.bracket-tree::-webkit-scrollbar { height: 4px; }
+.bracket-tree::-webkit-scrollbar-track { background: transparent; }
+.bracket-tree::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 2px; }
+
+.bracket-rounds { display: flex; gap: 0; min-width: max-content; align-items: stretch; }
+
+.bracket-round { display: flex; flex-direction: column; width: 185px; flex-shrink: 0; }
+.bracket-round:not(:last-child) { border-right: 1px solid var(--line); }
+
+.bracket-round-label {
+  height: 34px; display: flex; align-items: center; justify-content: center;
+  font-size: 0.66rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+  border-bottom: 1px solid var(--line); flex-shrink: 0;
+}
+
+.bracket-round-slots {
+  display: flex; flex-direction: column;
+  justify-content: space-around;
+  height: var(--bracket-height, 900px);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.bracket-node {
+  background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--r-sm); overflow: hidden; flex-shrink: 0;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  position: relative;
+}
+.bracket-node:hover { border-color: var(--line-2); box-shadow: var(--elev-1); }
+.bracket-node--live { border-color: rgba(240, 79, 101, .35); }
+.bracket-node--live::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--live); animation: pulse-live 2s ease-in-out infinite;
+}
+.bracket-node--placeholder { opacity: 0.38; }
+
+.bracket-node-team {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 8px; min-height: 30px;
+}
+.bracket-node-team--winner { background: rgba(245, 200, 66, .07); }
+.bracket-node-team--winner .bracket-node-name { color: var(--accent); font-weight: 700; }
+
+.bracket-node-flag { font-size: 0.9rem; flex-shrink: 0; line-height: 1; }
+.bracket-node-name {
+  flex: 1; font-size: 0.72rem; font-weight: 600;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bracket-node-score {
+  font-size: 0.78rem; font-weight: 800; color: var(--muted);
+  min-width: 14px; text-align: right; flex-shrink: 0;
+}
+.bracket-node-score--win { color: var(--accent); }
+.bracket-node-divider { height: 1px; background: var(--line); }
+
+/* ═══════ ITEM 3: Mobile knockout stage navigation ═══════ */
+.knockout-stage-header {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) 0 var(--sp-2); justify-content: space-between;
+}
+.knockout-stage-info { text-align: center; flex: 1; }
+.knockout-stage-title {
+  font-size: 1.05rem; font-weight: 800; color: var(--text);
+  letter-spacing: 0.06em; margin: 0; line-height: 1.2;
+}
+.knockout-stage-count { font-size: 0.7rem; color: var(--muted); font-weight: 600; margin-top: 2px; display: block; }
+
+.knockout-nav-btn {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--text); font-size: 1.4rem; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0;
+  transition: background var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
+}
+.knockout-nav-btn:hover:not(.disabled) { background: var(--surface-3); border-color: var(--line-2); }
+.knockout-nav-btn.disabled { opacity: 0.22; cursor: default; pointer-events: none; }
+
+.knockout-progress {
+  display: flex; align-items: flex-start; gap: 0;
+  overflow-x: auto; scrollbar-width: none;
+  padding: var(--sp-1) 0 var(--sp-4); justify-content: center;
+  -webkit-overflow-scrolling: touch;
+}
+.knockout-progress::-webkit-scrollbar { display: none; }
+
+.knockout-progress-step {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--sp-1); padding: 0;
+  background: none; border: none; cursor: pointer; flex-shrink: 0;
+  min-width: 56px; position: relative;
+}
+.knockout-progress-step:not(:last-child)::after {
+  content: ''; position: absolute;
+  left: calc(50% + 7px); top: 6px;
+  width: calc(100% - 14px); height: 1px;
+  background: var(--line);
+}
+.knockout-progress-step.active::after {
+  background: linear-gradient(to right, var(--accent), var(--line));
+}
+
+.knockout-progress-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--line-2); background: var(--surface-1);
+  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-base);
+  flex-shrink: 0; display: block;
+}
+.knockout-progress-step.active .knockout-progress-dot {
+  border-color: var(--accent); background: var(--accent);
+  box-shadow: 0 0 10px rgba(245, 200, 66, .4);
+}
+
+.knockout-progress-label {
+  font-size: 0.55rem; font-weight: 700; color: var(--faint);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap; text-align: center; line-height: 1.2;
+  max-width: 54px;
+}
+.knockout-progress-step.active .knockout-progress-label { color: var(--accent); }
+
+/* Desktop: show bracket tree, hide mobile stage navigator */
+@media (min-width: 820px) {
+  .bracket-tree-wrap { display: block; }
+  .knockout-mobile-view { display: none; }
+}
 
 /* ═══════ States (empty / error / loading) ═══════ */
 .empty, .error {

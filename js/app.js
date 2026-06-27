@@ -252,6 +252,12 @@ function applyCompetitionLayout() {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
+  // Competition name from layout (supports multi-competition)
+  const compName = state.layout?.competition_name || state.layout?.ui?.competition_name;
+  if (compName) {
+    const brandEl = document.querySelector('.brand p');
+    if (brandEl && brandEl.textContent !== compName) brandEl.textContent = compName;
+  }
 }
 
 function knockoutStageDefinitions() {
@@ -263,6 +269,7 @@ function knockoutStageDefinitions() {
       key: stage.stage_code || stage.stage_name,
       title: stage.stage_label || stage.stage_name || stage.stage_code || 'Eliminatoria',
       count: stage.match_count || stage.rules?.expected_matches || 0,
+      viewType: stage.view_type || 'BRACKET_ROUND',
     }))
     .filter((stage) => stage.key);
   return stages.length ? stages : knockoutStages;
@@ -535,16 +542,36 @@ async function renderToday(options = {}) {
   const data = cachedOverview && options.localOnly ? cachedOverview.data : await getMatchesOverview(options);
   const matches = data[state.dateMode] || [];
   setStatus('Partidos', `${matches.length} registros`);
-  const grouped = matches.reduce((acc, match) => {
-    const key = dateLabel(match.kickoff_at);
-    (acc[key] ||= []).push(match);
-    return acc;
-  }, {});
-  const content = Object.keys(grouped).map((label) => `
-    <section class="view-section">
-      <h2 class="section-title">${escapeHtml(state.dateMode === 'today' ? `Próximos hoy · ${label}` : label)}</h2>
-      <div class="grid">${grouped[label].map(matchCard).join('')}</div>
-    </section>`).join('') || emptyState('No hay partidos para este rango.');
+
+  // Group by date, then by kickoff time within each date
+  const byDate = {};
+  for (const match of matches) {
+    const dk = dateLabel(match.kickoff_at);
+    const tk = timeLabel(match.kickoff_at);
+    if (!byDate[dk]) byDate[dk] = {};
+    if (!byDate[dk][tk]) byDate[dk][tk] = { timeKey: tk, kickoffAt: match.kickoff_at, matches: [] };
+    byDate[dk][tk].matches.push(match);
+  }
+
+  const content = Object.keys(byDate).length
+    ? Object.keys(byDate).map((dateKey) => {
+        const timeBlocks = Object.values(byDate[dateKey]).sort((a, b) => (a.kickoffAt < b.kickoffAt ? -1 : 1));
+        const blocksHtml = timeBlocks.map((block) => {
+          const hasLive = block.matches.some((m) => ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(m.status));
+          const count = block.matches.length;
+          return `
+            <div class="kickoff-block">
+              <div class="kickoff-header">
+                <span class="kickoff-time">${escapeHtml(block.timeKey)} Chile</span>
+                <span class="kickoff-meta">${count} partido${count !== 1 ? 's' : ''}${hasLive ? ' <span class="live-badge">EN VIVO</span>' : ''}</span>
+              </div>
+              <div class="grid">${block.matches.map(matchCard).join('')}</div>
+            </div>`;
+        }).join('');
+        return `<section class="view-section">${blocksHtml}</section>`;
+      }).join('')
+    : emptyState('No hay partidos para este rango.');
+
   root.innerHTML = `<div class="today-view">${renderDateToolbar()}<div class="day-content fade-in">${content}</div></div>`;
   root.querySelectorAll('[data-date-mode]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -744,17 +771,45 @@ async function renderKnockout(options = {}) {
   }
   const active = stages.find((stage) => stage.key === state.knockoutStage) || stages[0];
   const activeMatches = byStage[active.key] || [];
+  const activeIndex = stages.findIndex((s) => s.key === state.knockoutStage);
+  const hasPrev = activeIndex > 0;
+  const hasNext = activeIndex < stages.length - 1;
+
   root.innerHTML = `
     <div class="knockout-view fade-in">
-      <div class="knockout-tabs" role="tablist" aria-label="Fases eliminatorias">
-        ${stages.map((stage) => `
-          <button class="${stage.key === active.key ? 'active' : ''}" data-knockout-stage="${stage.key}" type="button" role="tab" aria-selected="${stage.key === active.key ? 'true' : 'false'}">
-            ${escapeHtml(stage.title)}
-            <span>${(byStage[stage.key] || []).length || stage.count}</span>
-          </button>`).join('')}
+      <div class="bracket-tree-wrap">
+        ${renderBracketTree(byStage, stages)}
       </div>
-      ${knockoutColumn(active, activeMatches)}
+      <div class="knockout-mobile-view">
+        <div class="knockout-stage-header">
+          <button class="knockout-nav-btn${hasPrev ? '' : ' disabled'}" data-dir="-1" ${hasPrev ? '' : 'disabled'} aria-label="Etapa anterior">‹</button>
+          <div class="knockout-stage-info">
+            <h2 class="knockout-stage-title">${escapeHtml(active.title.toUpperCase())}</h2>
+            <span class="knockout-stage-count">${(byStage[active.key] || []).length || active.count} partidos</span>
+          </div>
+          <button class="knockout-nav-btn${hasNext ? '' : ' disabled'}" data-dir="1" ${hasNext ? '' : 'disabled'} aria-label="Etapa siguiente">›</button>
+        </div>
+        <div class="knockout-progress" role="tablist" aria-label="Progreso eliminatorias">
+          ${stages.map((stage) => `
+            <button class="knockout-progress-step${stage.key === state.knockoutStage ? ' active' : ''}"
+                    data-knockout-stage="${stage.key}" role="tab"
+                    aria-selected="${stage.key === state.knockoutStage}"
+                    title="${escapeHtml(stage.title)}">
+              <span class="knockout-progress-dot"></span>
+              <span class="knockout-progress-label">${escapeHtml(stage.title)}</span>
+            </button>`).join('')}
+        </div>
+        <div class="knockout-tabs" role="tablist" aria-label="Fases eliminatorias">
+          ${stages.map((stage) => `
+            <button class="${stage.key === active.key ? 'active' : ''}" data-knockout-stage="${stage.key}" type="button" role="tab" aria-selected="${stage.key === active.key ? 'true' : 'false'}">
+              ${escapeHtml(stage.title)}
+              <span>${(byStage[stage.key] || []).length || stage.count}</span>
+            </button>`).join('')}
+        </div>
+        ${knockoutColumn(active, activeMatches)}
+      </div>
     </div>`;
+
   root.querySelectorAll('[data-knockout-stage]').forEach((button) => {
     button.addEventListener('click', () => {
       if (button.dataset.knockoutStage === state.knockoutStage) return;
@@ -762,8 +817,74 @@ async function renderKnockout(options = {}) {
       renderKnockout({ localOnly: true });
     });
   });
+  root.querySelectorAll('[data-dir]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const nextStage = adjacentKnockoutStage(Number(btn.dataset.dir));
+      if (!nextStage) return;
+      state.knockoutStage = nextStage;
+      renderKnockout({ localOnly: true });
+    });
+  });
   const view = root.querySelector('.knockout-view');
   if (view) attachKnockoutSwipe(view);
+}
+
+function renderBracketTree(byStage, stages) {
+  const rounds = stages.filter((s) => !['GROUP_STAGE', 'LEAGUE_PHASE'].includes(s.key));
+  if (!rounds.length) return '';
+  const maxSlots = Math.max(...rounds.map((s) => s.count || 1), 1);
+  const NODE_H = 64;
+  const NODE_GAP = 6;
+  const bracketH = maxSlots * (NODE_H + NODE_GAP);
+  return `
+    <div class="bracket-tree">
+      <div class="bracket-rounds" style="--bracket-height:${bracketH}px">
+        ${rounds.map((stage) => {
+          const stageMatches = byStage[stage.key] || [];
+          const total = Math.max(stage.count || stageMatches.length, 1);
+          const nodes = Array.from({ length: total }, (_, i) => stageMatches[i] || null);
+          return `
+            <div class="bracket-round">
+              <div class="bracket-round-label">${escapeHtml(stage.title)}</div>
+              <div class="bracket-round-slots">
+                ${nodes.map((match) => match ? bracketNodeCard(match) : `
+                  <div class="bracket-node bracket-node--placeholder">
+                    <div class="bracket-node-team">
+                      <span class="placeholder-icon">◇</span>
+                      <span class="bracket-node-name" style="color:var(--faint);font-style:italic">Por definir</span>
+                    </div>
+                    <div class="bracket-node-divider"></div>
+                    <div class="bracket-node-team">
+                      <span class="placeholder-icon">◇</span>
+                      <span class="bracket-node-name" style="color:var(--faint);font-style:italic">Por definir</span>
+                    </div>
+                  </div>`).join('')}
+              </div>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+function bracketNodeCard(match) {
+  const isLive = ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(match.status);
+  const hasScore = match.home_score != null && match.away_score != null;
+  const homeWin = hasScore && match.home_score > match.away_score;
+  const awayWin = hasScore && match.away_score > match.home_score;
+  return `
+    <div class="bracket-node${isLive ? ' bracket-node--live' : ''}">
+      <div class="bracket-node-team${homeWin ? ' bracket-node-team--winner' : ''}">
+        <span class="bracket-node-flag">${teamFlag(match.home)}</span>
+        <span class="bracket-node-name">${escapeHtml(match.home?.display_name || match.home?.slot_label || '?')}</span>
+        ${hasScore ? `<span class="bracket-node-score${homeWin ? ' bracket-node-score--win' : ''}">${match.home_score}</span>` : ''}
+      </div>
+      <div class="bracket-node-divider"></div>
+      <div class="bracket-node-team${awayWin ? ' bracket-node-team--winner' : ''}">
+        <span class="bracket-node-flag">${teamFlag(match.away)}</span>
+        <span class="bracket-node-name">${escapeHtml(match.away?.display_name || match.away?.slot_label || '?')}</span>
+        ${hasScore ? `<span class="bracket-node-score${awayWin ? ' bracket-node-score--win' : ''}">${match.away_score}</span>` : ''}
+      </div>
+    </div>`;
 }
 
 function knockoutColumn(stage, matches) {
