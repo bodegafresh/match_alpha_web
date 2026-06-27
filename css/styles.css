@@ -335,6 +335,7 @@ a { color: var(--accent-2); }
 }
 
 .match-time { text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-minute { font-weight: 700; letter-spacing: .01em; }
 .live     { color: var(--live); }
 .finished { color: var(--ok); }
 

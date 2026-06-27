@@ -427,9 +427,28 @@ function statusClass(status) {
 
 function statusLabel(status) {
   const value = String(status || '').toUpperCase();
-  if (['FINISHED', 'FT'].includes(value)) return 'FINISHED';
-  if (['LIVE', 'IN_PLAY', 'HT'].includes(value)) return 'EN VIVO';
-  return value || 'SCHEDULED';
+  if (['FINISHED', 'FT', 'AET', 'PEN'].includes(value)) return 'Finalizado';
+  if (['LIVE', 'IN_PLAY'].includes(value)) return 'EN VIVO';
+  if (value === 'HT') return 'Descanso';
+  if (value === 'PAUSED') return 'Pausado';
+  if (['POSTPONED'].includes(value)) return 'Pospuesto';
+  if (['CANCELLED', 'ABANDONED'].includes(value)) return 'Cancelado';
+  return 'Programado';
+}
+
+function liveMinuteLabel(match) {
+  if (!match.kickoff_at) return null;
+  const value = String(match.status || '').toUpperCase();
+  if (value === 'HT') return '45+\'';
+  if (!['LIVE', 'IN_PLAY'].includes(value)) return null;
+  const elapsed = Math.floor((Date.now() - new Date(match.kickoff_at).getTime()) / 60000);
+  if (elapsed < 0) return null;
+  if (elapsed <= 45) return `${elapsed}'`;
+  // After 45min: show as extra time (second half started ~15min after HT)
+  const secondHalf = elapsed - 60; // ~15min HT break
+  if (secondHalf < 0) return '45+\'';
+  const min = Math.min(45 + secondHalf, 90);
+  return `${min}'`;
 }
 
 function weatherIcon(condition) {
@@ -460,6 +479,13 @@ function venueDetailHtml(match) {
   return `<div class="venue">📍 ${escapeHtml(main)}${local ? ` · ${escapeHtml(local)}` : ''}</div>`;
 }
 
+function matchTimeHtml(match) {
+  const label = escapeHtml(statusLabel(match.status));
+  const min = liveMinuteLabel(match);
+  if (min) return `${label} · <strong class="match-minute">${escapeHtml(min)}</strong>`;
+  return `${label} · ${escapeHtml(chileDateTimeLabel(match.kickoff_at))}`;
+}
+
 function matchCard(match) {
   const home = match.home || { display_name: 'Por definir', flag_emoji: '🏳️' };
   const away = match.away || { display_name: 'Por definir', flag_emoji: '🏳️' };
@@ -471,7 +497,7 @@ function matchCard(match) {
     <article class="card match-card fade-in" data-status="${escapeHtml(match.status || 'SCHEDULED')}">
       <div class="match-meta">
         <span class="stage-chip${isLive ? ' stage-chip--live' : ''}">${escapeHtml(meta || 'Partido')}</span>
-        <span class="match-time ${statusClass(match.status)}">${escapeHtml(statusLabel(match.status))} · ${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</span>
+        <span class="match-time ${statusClass(match.status)}">${matchTimeHtml(match)}</span>
       </div>
       <div class="teams-row">
         <div class="team-side"><div class="flag">${teamFlag(home)}</div><div class="name" title="${escapeHtml(home.display_name)}">${escapeHtml(teamShortName(home))}</div></div>
