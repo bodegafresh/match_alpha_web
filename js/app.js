@@ -628,32 +628,134 @@ async function renderToday(options = {}) {
   if (todayView) attachDaySwipe(todayView);
 }
 
+// ─── Stage view renderers ─────────────────────────────────────────────────────
+// Each renderer receives pre-fetched data and layout context.
+// renderStandings() is the dispatch entry point — it reads view_type from layout
+// and delegates to the correct renderer. Adding a new competition format only
+// requires registering a new renderer here; the dispatch table handles the rest.
+
+const STANDINGS_RENDERERS = {
+  GROUP_TABLES: renderGroupTablesView,
+  LEAGUE_TABLE: renderLeagueTableView,
+};
+
+function _standingsRow(row, index, zoneCls = '') {
+  const pos = row.position || index + 1;
+  const posCls = pos <= 3 ? `standings-row--${pos === 1 ? '1st' : pos === 2 ? '2nd' : '3rd'}` : '';
+  const cls = [posCls, zoneCls].filter(Boolean).join(' ');
+  return `
+    <tr${cls ? ` class="${cls}"` : ''}>
+      <td>${pos}</td>
+      <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name)}</strong></td>
+      <td><strong>${row.points}</strong></td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${row.goals_for}</td><td>${row.goals_against}</td><td>${row.goal_difference}</td>
+    </tr>`;
+}
+
+function _standingsTable(rows, zoneResolver = () => '') {
+  return `
+    <div class="card table-card">
+      <table>
+        <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
+        <tbody>${rows.map((row, i) => _standingsRow(row, i, zoneResolver(row, i))).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderGroupTablesView(groups) {
+  return groups.map((group) => `
+    <section class="group-block fade-in">
+      <h2 class="section-title">${escapeHtml(groupLabel(group.group_name))}</h2>
+      ${_standingsTable(group.standings || [], (row, i) => {
+        const pos = row.position || i + 1;
+        const qualify = group.rules?.promotion_spots ?? 2;
+        if (pos <= qualify) return 'zone--promote';
+        return '';
+      })}
+    </section>`).join('');
+}
+
+function renderLeagueTableView(groups, stageRules = {}) {
+  const allRows = groups.flatMap((g) => g.standings || []);
+  const sorted = [...allRows].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.goal_difference !== a.goal_difference) return b.goal_difference - a.goal_difference;
+    return b.goals_for - a.goals_for;
+  }).map((row, i) => ({ ...row, position: i + 1 }));
+
+  const promoteSpots = stageRules.promotion_spots ?? 0;
+  const euroSpots    = stageRules.europe_spots    ?? 0;
+  const relegateSpots = stageRules.relegation_spots ?? 0;
+  const total = sorted.length;
+
+  const zoneResolver = (row) => {
+    const pos = row.position;
+    if (promoteSpots > 0 && pos <= promoteSpots)                          return 'zone--promote';
+    if (euroSpots    > 0 && pos <= promoteSpots + euroSpots)              return 'zone--europe';
+    if (relegateSpots > 0 && pos > total - relegateSpots)                 return 'zone--relegate';
+    return '';
+  };
+
+  const legend = [
+    promoteSpots  > 0 ? `<span class="zone-legend zone-legend--promote"></span> Clasificación` : '',
+    euroSpots     > 0 ? `<span class="zone-legend zone-legend--europe"></span> Europa`          : '',
+    relegateSpots > 0 ? `<span class="zone-legend zone-legend--relegate"></span> Descenso`     : '',
+  ].filter(Boolean).join('');
+
+  return `
+    <section class="group-block fade-in">
+      ${_standingsTable(sorted, zoneResolver)}
+      ${legend ? `<div class="zone-legend-bar">${legend}</div>` : ''}
+    </section>`;
+}
+
+async function renderMatchListView(stageCode, stageTitle, options = {}) {
+  const data = await cached('web/matches', { stage_code: stageCode }, 90000, options);
+  const matches = data.matches || data.items || [];
+  if (!matches.length) return emptyState(`Sin partidos para ${escapeHtml(stageTitle)}.`);
+
+  const byKickoff = matches.reduce((acc, m) => {
+    const dt = new Date(m.kickoff_at);
+    const key = dt.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: CHILE_TIMEZONE });
+    (acc[key] ||= []).push(m);
+    return acc;
+  }, {});
+
+  return Object.entries(byKickoff).map(([dateLabel, dayMatches]) => `
+    <section class="kickoff-block fade-in">
+      <header class="kickoff-header">
+        <span class="kickoff-time">${escapeHtml(dateLabel)}</span>
+      </header>
+      <div class="grid">${dayMatches.map(matchCard).join('')}</div>
+    </section>`).join('');
+}
+
 async function renderStandings(options = {}) {
   if (!options.silent) loading('Posiciones');
   await ensureLayout();
   const data = await cached('web/standings', {}, 90000, options);
   const groups = data.groups || [];
-  const isLeague = state.layout?.capabilities?.has_league_table && !state.layout?.capabilities?.has_groups;
-  const statusLabel = isLeague ? `${groups[0]?.standings?.length ?? 0} equipos` : `${groups.length} grupos`;
-  setStatus('Posiciones', statusLabel);
-  root.innerHTML = groups.map((group) => `
-    <section class="group-block fade-in">
-      ${isLeague ? '' : `<h2 class="section-title">${escapeHtml(groupLabel(group.group_name))}</h2>`}
-      <div class="card table-card">
-        <table>
-          <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
-          <tbody>${(group.standings || []).map((row, index) => {
-              const pos = row.position || index + 1;
-              const posCls = pos <= 3 ? ` class="standings-row--${pos === 1 ? '1st' : pos === 2 ? '2nd' : '3rd'}"` : '';
-              return `
-            <tr${posCls}>
-              <td>${pos}</td>
-              <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name)}</strong></td>
-              <td><strong>${row.points}</strong></td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${row.goals_for}</td><td>${row.goals_against}</td><td>${row.goal_difference}</td>
-            </tr>`;}).join('')}</tbody>
-        </table>
-      </div>
-    </section>`).join('') || emptyState('No hay posiciones disponibles.');
+
+  // Determine which renderer to use from layout stages
+  const leagueStages   = stageDefinitionsByViewType('LEAGUE_TABLE');
+  const groupStages    = stageDefinitionsByViewType('GROUP_TABLES');
+  const hasLeagueStage = leagueStages.length > 0;
+  const hasGroupStage  = groupStages.length > 0;
+
+  // Fallback: capabilities flags if no explicit stage view_type
+  const isLeagueByCapability = state.layout?.capabilities?.has_league_table && !state.layout?.capabilities?.has_groups;
+  const useLeague = hasLeagueStage || (!hasGroupStage && isLeagueByCapability);
+
+  if (useLeague) {
+    const stageRules = state.layout?.stages?.find(
+      (s) => String(s.view_type || '').toUpperCase() === 'LEAGUE_TABLE'
+    )?.rules || {};
+    const totalTeams = groups.flatMap((g) => g.standings || []).length;
+    setStatus('Posiciones', `${totalTeams} equipos`);
+    root.innerHTML = renderLeagueTableView(groups, stageRules) || emptyState('No hay posiciones disponibles.');
+  } else {
+    setStatus('Posiciones', `${groups.length} grupos`);
+    root.innerHTML = renderGroupTablesView(groups) || emptyState('No hay posiciones disponibles.');
+  }
 }
 
 async function renderTeams(options = {}) {

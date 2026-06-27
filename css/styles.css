@@ -481,6 +481,24 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   letter-spacing: 0.06em; animation: pulse-live 2s ease-in-out infinite;
 }
 
+/* ═══════ Standings zone coloring (league table + group tables) ═══════ */
+.zone--promote td:first-child { border-left: 3px solid var(--ok); }
+.zone--europe  td:first-child { border-left: 3px solid var(--accent-2); }
+.zone--relegate td:first-child { border-left: 3px solid var(--danger); }
+
+.zone-legend-bar {
+  display: flex; gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: 0.72rem; color: var(--muted);
+}
+.zone-legend {
+  display: inline-block; width: 10px; height: 10px;
+  border-radius: 2px; flex-shrink: 0;
+}
+.zone-legend--promote  { background: var(--ok); }
+.zone-legend--europe   { background: var(--accent-2); }
+.zone-legend--relegate { background: var(--danger); }
+
 /* ═══════ Knockout bracket ═══════ */
 .knockout-view { display: grid; gap: .9rem; touch-action: pan-y; }
 .knockout-view.swipe-left  .knockout-column { animation: swipeLeft  180ms var(--ease) both; }
