@@ -669,7 +669,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .knockout-nav-btn.disabled { opacity: 0.22; cursor: default; pointer-events: none; }
 
 .knockout-progress {
-  display: flex; align-items: flex-start; gap: 0;
+  display: none; align-items: flex-start; gap: 0;
   overflow-x: auto; scrollbar-width: none;
   padding: var(--sp-1) 0 var(--sp-4); justify-content: center;
   -webkit-overflow-scrolling: touch;
@@ -1193,6 +1193,8 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .match-card { min-height: 166px; padding: 14px 16px; gap: .6rem; }
   .status-strip { font-size: .78rem; }
   .ev-summary-bar { grid-template-columns: repeat(3, 1fr); }
+  .knockout-tabs { display: none; }
+  .toolbar { position: static; background: none; backdrop-filter: none; margin-inline: 0; padding: 0; }
 }
 
 @media (max-width: 680px) {
