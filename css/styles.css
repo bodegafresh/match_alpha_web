@@ -218,34 +218,38 @@ a { color: var(--accent-2); }
 .today-view.swipe-left  .day-content { animation: swipeLeft  180ms var(--ease) both; }
 .today-view.swipe-right .day-content { animation: swipeRight 180ms var(--ease) both; }
 
-/* Date toolbar */
+/* ── Shared pill-nav: date toolbar + knockout stage tabs ── */
 .toolbar { display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; }
+
 .segment {
-  display: flex; gap: 3px;
-  padding: 4px;
+  display: flex; gap: 3px; padding: 4px;
   background: rgba(10, 22, 38, .8);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
   overflow-x: auto; overflow-y: hidden;
   max-width: 100%; scrollbar-width: none;
   scroll-snap-type: x proximity; touch-action: pan-x;
 }
 .segment::-webkit-scrollbar { display: none; }
+
+/* Pill button — shared base */
 .segment button {
   border: none; background: transparent;
   color: var(--muted); border-radius: var(--r-sm);
-  padding: .48rem .7rem; min-height: 36px;
+  padding: .48rem .82rem; min-height: 36px;
   font-weight: 700; white-space: nowrap; font-size: .8rem;
   scroll-snap-align: start;
-  transition: background var(--t-fast), color var(--t-fast);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t-base) var(--ease);
 }
-.segment button span { margin-right: .28rem; color: var(--accent-2); }
+.segment button:hover { background: var(--hover); color: var(--text); }
 .segment button.active {
   background: var(--accent); color: #060d17; font-weight: 800;
+  box-shadow: var(--glow-gold);
 }
+.segment button.active:hover { background: var(--accent); color: #060d17; }
+
+/* Prefix icons (← • → ↵) */
+.segment button span { margin-right: .28rem; color: var(--accent-2); }
 .segment button.active span { color: #060d17; }
-.segment button:hover { background: var(--hover); color: var(--text); }
-.segment button.active:hover { color: #060d17; background: var(--accent); }
 
 /* Section titles */
 .view-section { display: grid; gap: .9rem; }
@@ -459,37 +463,39 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .knockout-view.swipe-left  .knockout-column { animation: swipeLeft  180ms var(--ease) both; }
 .knockout-view.swipe-right .knockout-column { animation: swipeRight 180ms var(--ease) both; }
 
+/* knockout-tabs: same container + pill style as .segment */
 .knockout-tabs {
-  display: flex; gap: 4px;
-  max-width: 100%; overflow-x: auto; padding: 3px 2px 6px;
+  display: flex; gap: 3px; padding: 4px;
+  background: rgba(10, 22, 38, .8);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  max-width: 100%; overflow-x: auto; overflow-y: hidden;
   scroll-snap-type: x proximity; scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 .knockout-tabs::-webkit-scrollbar { display: none; }
 .knockout-tabs button {
-  flex: 0 0 auto; min-height: 38px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-1);
-  color: var(--muted); padding: .46rem .82rem;
-  font-weight: 700; font-size: .78rem; white-space: nowrap;
+  flex: 0 0 auto; border: none;
+  background: transparent;
+  color: var(--muted); border-radius: var(--r-sm);
+  padding: .48rem .82rem; min-height: 36px;
+  font-weight: 700; font-size: .8rem; white-space: nowrap;
   scroll-snap-align: start;
-  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), box-shadow var(--t-base);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t-base) var(--ease);
 }
-.knockout-tabs button:hover { background: var(--surface-2); color: var(--text); border-color: var(--line-2); }
+.knockout-tabs button:hover { background: var(--hover); color: var(--text); }
 .knockout-tabs button.active {
   background: var(--accent); color: #060d17;
-  border-color: rgba(245, 200, 66, .6);
-  font-weight: 800;
-  box-shadow: var(--glow-gold);
+  font-weight: 800; box-shadow: var(--glow-gold);
 }
+.knockout-tabs button.active:hover { background: var(--accent); color: #060d17; }
 .knockout-tabs button span {
   display: inline-grid; place-items: center;
   min-width: 1.35rem; height: 1.35rem;
   margin-left: .35rem; border-radius: 999px;
-  background: rgba(255, 255, 255, .10);
-  font-size: .68rem;
+  background: rgba(255, 255, 255, .15);
+  font-size: .68rem; font-weight: 700;
 }
+.knockout-tabs button.active span { background: rgba(6, 13, 23, .22); }
 .knockout-tabs button.active span { background: rgba(6, 13, 23, .18); }
 
 .knockout-board {
@@ -1123,7 +1129,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .roster-grid { display: grid; grid-template-columns: 1fr; }
 
   .knockout-board { grid-auto-columns: minmax(82vw, 1fr); gap: 16px; }
-  .knockout-tabs button { min-height: 32px; padding: .38rem .58px; font-size: .72rem; }
+  .knockout-tabs button { min-height: 32px; padding: .38rem .6rem; font-size: .72rem; }
   .bracket-card { min-height: auto; padding: 11px; border-radius: 12px; gap: .5rem; }
   .bracket-top { align-items: flex-start; font-size: .66rem; }
   .bracket-team { min-height: 34px; padding: .44rem .5rem; border-radius: 9px; font-size: .78rem; }
