@@ -662,16 +662,20 @@ function _standingsTable(rows, zoneResolver = () => '') {
 }
 
 function renderGroupTablesView(groups) {
-  return groups.map((group) => `
+  const sorted = [...groups].sort((a, b) => (a.group_order || 0) - (b.group_order || 0));
+  return sorted.map((group) => {
+    const rows = [...(group.standings || [])].sort((a, b) => (a.position || 99) - (b.position || 99));
+    return `
     <section class="group-block fade-in">
       <h2 class="section-title">${escapeHtml(groupLabel(group.group_name))}</h2>
-      ${_standingsTable(group.standings || [], (row, i) => {
+      ${_standingsTable(rows, (row, i) => {
         const pos = row.position || i + 1;
         const qualify = group.rules?.promotion_spots ?? 2;
         if (pos <= qualify) return 'zone--promote';
         return '';
       })}
-    </section>`).join('');
+    </section>`;
+  }).join('');
 }
 
 function renderLeagueTableView(groups, stageRules = {}) {
