@@ -424,10 +424,11 @@ function matchCard(match) {
   const group = matchGroupLabel(match);
   const stage = matchStageLabel(match);
   const meta = [stage, group].filter(Boolean).join(' · ');
+  const isLive = ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(match.status);
   return `
-    <article class="card match-card fade-in">
+    <article class="card match-card fade-in" data-status="${escapeHtml(match.status || 'SCHEDULED')}">
       <div class="match-meta">
-        <span class="stage-chip">${escapeHtml(meta || 'Partido')}</span>
+        <span class="stage-chip${isLive ? ' stage-chip--live' : ''}">${escapeHtml(meta || 'Partido')}</span>
         <span class="match-time ${statusClass(match.status)}">${escapeHtml(statusLabel(match.status))} · ${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</span>
       </div>
       <div class="teams-row">
@@ -567,12 +568,15 @@ async function renderStandings(options = {}) {
       <div class="card table-card">
         <table>
           <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
-          <tbody>${(group.standings || []).map((row, index) => `
-            <tr>
-              <td>${row.position || index + 1}</td>
+          <tbody>${(group.standings || []).map((row, index) => {
+              const pos = row.position || index + 1;
+              const posCls = pos <= 3 ? ` class="standings-row--${pos === 1 ? '1st' : pos === 2 ? '2nd' : '3rd'}"` : '';
+              return `
+            <tr${posCls}>
+              <td>${pos}</td>
               <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name)}</strong></td>
               <td><strong>${row.points}</strong></td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${row.goals_for}</td><td>${row.goals_against}</td><td>${row.goal_difference}</td>
-            </tr>`).join('')}</tbody>
+            </tr>`;}).join('')}</tbody>
         </table>
       </div>
     </section>`).join('') || emptyState('No hay posiciones disponibles.');
@@ -952,6 +956,13 @@ function evOpportunityCard(opp) {
   const fairOddsStr = opp.fairOdds ? `cuota justa ${fmtNum(opp.fairOdds)}` : '';
   const bookOddsStr = opp.decimalOdds ? `libro ${fmtNum(opp.decimalOdds)}` : '';
 
+  const confLevel = opp.confidenceScore != null
+    ? (opp.confidenceScore > 0.65 ? 'high' : opp.confidenceScore > 0.35 ? 'medium' : 'low')
+    : 'low';
+  const evHeat = opp.ev != null
+    ? (opp.ev > 0.05 ? 'ev-value--hot' : opp.ev > 0.02 ? 'ev-value--warm' : 'ev-value--cold')
+    : 'ev-value--cold';
+
   return `
     <article class="ev-card ${cardClass} fade-in">
       <div class="ev-card-header">
@@ -959,14 +970,19 @@ function evOpportunityCard(opp) {
           <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
           <div class="ev-match-meta">${escapeHtml(marketLabel)} ${escapeHtml(kickoff)}${escapeHtml(oddsAge)}</div>
         </div>
-        ${decisionStatusChip(opp.decisionStatus)}
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <div class="confidence-ring" data-level="${confLevel}" title="Confianza: ${opp.confidenceScore != null ? fmtNum(opp.confidenceScore) : '—'}">
+            ${confLevel === 'high' ? '✓' : confLevel === 'medium' ? '~' : '?'}
+          </div>
+          ${decisionStatusChip(opp.decisionStatus)}
+        </div>
       </div>
       ${probBars(opp.modelProb, opp.marketProb)}
       <div class="ev-metrics-row">
         ${fairOddsStr ? `<div class="ev-metric-pill"><b>${escapeHtml(fairOddsStr)}</b></div>` : ''}
         ${bookOddsStr ? `<div class="ev-metric-pill"><b>${escapeHtml(bookOddsStr)}</b></div>` : ''}
-        ${opp.edge != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.edge)}</b><span>edge</span></div>` : ''}
-        ${opp.ev != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.ev)}</b><span>EV</span></div>` : ''}
+        ${opp.edge != null ? `<div class="ev-metric-pill"><b class="${evHeat}">${fmtPct(opp.edge)}</b><span>edge</span></div>` : ''}
+        ${opp.ev != null ? `<div class="ev-metric-pill"><b class="${evHeat}">${fmtPct(opp.ev)}</b><span>EV</span></div>` : ''}
         ${opp.kellyFraction != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.kellyFraction)}</b><span>Kelly</span></div>` : ''}
         ${opp.confidenceScore != null ? `<div class="ev-metric-pill"><b>${fmtNum(opp.confidenceScore)}</b><span>conf</span></div>` : ''}
       </div>
@@ -985,7 +1001,7 @@ function evSummaryBar(opportunities, blocked) {
   const avgConf = confList.length ? confList.reduce((a, b) => a + b, 0) / confList.length : null;
 
   const cards = [
-    { label: 'EV+ activos', value: opportunities.length, cls: opportunities.length ? 'metric-card--blue' : '' },
+    { label: 'EV+ activos', value: opportunities.length, cls: `metric-card--hero${opportunities.length ? ' metric-card--blue' : ''}` },
     { label: 'Bettable', value: bettable, cls: bettable ? 'metric-card--ok' : '' },
     { label: 'Paper', value: paper, cls: paper ? 'metric-card--warn' : '' },
     { label: 'Bloqueados', value: blocked.length, cls: '' },
