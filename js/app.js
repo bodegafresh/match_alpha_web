@@ -522,15 +522,25 @@ async function getMatchesOverview(options = {}) {
 }
 
 function renderDateToolbar() {
-  return `
-    <div class="toolbar">
-      <div class="segment" role="tablist" aria-label="Fechas">
-        ${dateModes.map(([mode, label, icon]) => `
-          <button class="${state.dateMode === mode ? 'active' : ''}" data-date-mode="${mode}" type="button">
-            <span>${escapeHtml(icon)}</span>${escapeHtml(label)}
-          </button>`).join('')}
-      </div>
-    </div>`;
+  const bar = document.getElementById('date-filter-bar');
+  if (bar) {
+    bar.hidden = false;
+    bar.innerHTML = `
+      <div class="toolbar">
+        <div class="segment" role="tablist" aria-label="Fechas">
+          ${dateModes.map(([mode, label, icon]) => `
+            <button class="${state.dateMode === mode ? 'active' : ''}" data-date-mode="${mode}" type="button">
+              <span>${escapeHtml(icon)}</span>${escapeHtml(label)}
+            </button>`).join('')}
+        </div>
+      </div>`;
+  }
+  return ''; // no longer injected inline into today-view
+}
+
+function hideDateFilterBar() {
+  const bar = document.getElementById('date-filter-bar');
+  if (bar) bar.hidden = true;
 }
 
 function adjacentDateMode(direction) {
@@ -605,8 +615,9 @@ async function renderToday(options = {}) {
       }).join('')
     : emptyState('No hay partidos para este rango.');
 
-  root.innerHTML = `<div class="today-view">${renderDateToolbar()}<div class="day-content fade-in">${content}</div></div>`;
-  root.querySelectorAll('[data-date-mode]').forEach((button) => {
+  renderDateToolbar(); // injects into #date-filter-bar, outside scroll area
+  root.innerHTML = `<div class="today-view"><div class="day-content fade-in">${content}</div></div>`;
+  document.getElementById('date-filter-bar')?.querySelectorAll('[data-date-mode]').forEach((button) => {
     button.addEventListener('click', () => {
       if (state.dateMode === button.dataset.dateMode) return;
       state.dateMode = button.dataset.dateMode;
@@ -1538,12 +1549,12 @@ async function render(options = {}) {
   try {
     await ensureLayout(renderOptions);
     updateTabs();
-    if (state.view === 'standings') await renderStandings(renderOptions);
-    else if (state.view === 'teams') await renderTeams(renderOptions);
-    else if (state.view === 'knockout') await renderKnockout(renderOptions);
-    else if (state.view === 'ev') await renderEV(renderOptions);
-    else if (state.view === 'model') await renderModel(renderOptions);
-    else if (state.view === 'stats') await renderStats(renderOptions);
+    if (state.view === 'standings') { hideDateFilterBar(); await renderStandings(renderOptions); }
+    else if (state.view === 'teams') { hideDateFilterBar(); await renderTeams(renderOptions); }
+    else if (state.view === 'knockout') { hideDateFilterBar(); await renderKnockout(renderOptions); }
+    else if (state.view === 'ev') { hideDateFilterBar(); await renderEV(renderOptions); }
+    else if (state.view === 'model') { hideDateFilterBar(); await renderModel(renderOptions); }
+    else if (state.view === 'stats') { hideDateFilterBar(); await renderStats(renderOptions); }
     else await renderToday(renderOptions);
   } catch (error) {
     if (error.name === 'AbortError' || seq !== state.renderSeq) return;

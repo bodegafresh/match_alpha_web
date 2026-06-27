@@ -1190,11 +1190,14 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .shell { width: min(100% - 1.5rem, 1360px); }
   .grid { grid-template-columns: 1fr; gap: 12px; }
   .knockout-list { grid-template-columns: 1fr; gap: 10px; }
-  .match-card { min-height: 166px; padding: 14px 16px; gap: .6rem; }
+  .match-card { min-height: 140px; padding: 10px 14px; gap: .45rem; }
+  .score { font-size: 1.9rem; }
+  .stage-chip { font-size: 0.68rem; padding: 3px 8px; }
   .status-strip { font-size: .78rem; }
   .ev-summary-bar { grid-template-columns: repeat(3, 1fr); }
   .knockout-tabs { display: none; }
   .toolbar { position: static; background: none; backdrop-filter: none; margin-inline: 0; padding: 0; }
+  #date-filter-bar { margin-bottom: .5rem; }
 }
 
 @media (max-width: 680px) {
