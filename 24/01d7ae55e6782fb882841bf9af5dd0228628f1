@@ -1,0 +1,58 @@
+js/app.js
+  s_acedc47d393e24::t_e2ab855382d92e 947-950,955-965,968-981
+  s_acedc47d393e24::t_e587c3a5b031ba 1072-1081,1083,1087
+css/styles.css
+  s_acedc47d393e24::t_d09edbc812f3e7 214-216
+  s_acedc47d393e24::t_e926b967d5c2df 927-928
+  s_acedc47d393e24::t_8e43e0e50fe7c5 109
+  s_acedc47d393e24::t_9f20f853b7a7c6 1145-1150,1152,1158
+  s_acedc47d393e24::t_3b077be1551298 91-92
+  s_acedc47d393e24::t_65366064546f59 159-160
+  s_acedc47d393e24::t_07a2f966cc4573 289-290
+  s_acedc47d393e24::t_a692b4712535c1 163
+  s_acedc47d393e24::t_62b75f36a8187f 1155
+  s_acedc47d393e24::t_432dca58799522 282
+  s_acedc47d393e24::t_89e92b25df22eb 527-528
+  s_acedc47d393e24::t_f2090d76cf3575 352
+  s_acedc47d393e24::t_f514acaf51bae0 131
+  s_acedc47d393e24::t_e6e2feb7a03e69 943
+  s_acedc47d393e24::t_c2710ca45fcafb 1113-1114
+  s_acedc47d393e24::t_8bbcb812afec34 808-813,815-817,819-824,826-844
+  s_acedc47d393e24::t_8e8c44a174bb92 190
+  s_acedc47d393e24::t_80045c1daabe87 45-49
+  s_acedc47d393e24::t_6f1c1fe2032633 257-258
+  s_acedc47d393e24::t_e40c00f540c22e 865
+  s_acedc47d393e24::t_71e7f2b02ffea5 762
+  s_acedc47d393e24::t_0901c1477515ef 199
+  s_acedc47d393e24::t_b4c32f320695db 923
+  s_acedc47d393e24::t_db60a0a9a142fe 62
+  s_acedc47d393e24::t_56ef2aac40ffcd 367
+  s_acedc47d393e24::t_6d693061cea02d 868,873,875
+  s_acedc47d393e24::t_2ae89e901429c8 267
+  s_acedc47d393e24::t_f33ab32a1ac3ad 121,123,127-128
+  s_acedc47d393e24::t_ac6b9eb6e2f2d0 1153-1154
+  s_acedc47d393e24::t_06efb581bd5929 771
+  s_acedc47d393e24::t_f70d8d4d6c23e3 932-933
+  s_acedc47d393e24::t_302d2fc29de3e3 1103
+  s_acedc47d393e24::t_8b4271c5048d54 1117
+  s_acedc47d393e24::t_85c4840201aeb8 503
+  s_acedc47d393e24::t_89837d49e287ea 788,791
+  s_acedc47d393e24::t_cd78c473a8a939 376
+  s_acedc47d393e24::t_fd419c5b3fec77 775-776
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "2401d7ae55e6782fb882841bf9af5dd0228628f1",
+  "prompts": {},
+  "sessions": {
+    "s_acedc47d393e24": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6da0aff-581b-41b0-9499-515d6edfe372",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Marco Cerda <marco.cerda@mercadolibre.cl>"
+    }
+  }
+}
