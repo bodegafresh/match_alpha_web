@@ -944,50 +944,41 @@ function fmtNum(value, decimals = 2) {
   return Number(value).toFixed(decimals);
 }
 
-function evOpportunityCard(opp) {
-  const cardClass = opp.decisionStatus === 'BETTABLE' ? 'ev-card--bettable'
-    : opp.decisionStatus === 'PAPER_ONLY' ? 'ev-card--paper'
-    : 'ev-card--blocked';
+function evOpportunityRow(opp) {
+  const rowClass = opp.decisionStatus === 'BETTABLE' ? 'ev-row--bettable'
+    : opp.decisionStatus === 'PAPER_ONLY' ? 'ev-row--paper'
+    : 'ev-row--blocked';
 
-  const marketLabel = [opp.marketCode, opp.selectionCode].filter(Boolean).join(' · ');
-  const kickoff = opp.kickoffAt ? `· ${chileDateTimeLabel(opp.kickoffAt)}` : '';
-  const oddsAge = opp.oddsAgeMinutes != null ? ` · odds hace ${Math.round(opp.oddsAgeMinutes)}min` : '';
-
-  const fairOddsStr = opp.fairOdds ? `cuota justa ${fmtNum(opp.fairOdds)}` : '';
-  const bookOddsStr = opp.decimalOdds ? `libro ${fmtNum(opp.decimalOdds)}` : '';
-
-  const confLevel = opp.confidenceScore != null
-    ? (opp.confidenceScore > 0.65 ? 'high' : opp.confidenceScore > 0.35 ? 'medium' : 'low')
-    : 'low';
   const evHeat = opp.ev != null
     ? (opp.ev > 0.05 ? 'ev-value--hot' : opp.ev > 0.02 ? 'ev-value--warm' : 'ev-value--cold')
     : 'ev-value--cold';
+  const edgeHeat = opp.edge != null
+    ? (opp.edge > 0.05 ? 'ev-value--hot' : opp.edge > 0.02 ? 'ev-value--warm' : opp.edge < 0 ? 'ev-value--neg' : 'ev-value--cold')
+    : '';
+
+  const kickoff = opp.kickoffAt ? chileDateTimeLabel(opp.kickoffAt) : '';
+  const fairArrow = opp.fairOdds && opp.decimalOdds
+    ? `${fmtNum(opp.fairOdds)} → <b>${fmtNum(opp.decimalOdds)}</b>`
+    : opp.fairOdds ? fmtNum(opp.fairOdds) : '—';
+  const overlay = opp.fairOdds && opp.decimalOdds && opp.edge != null
+    ? `<br><span class="ev-overlay ${edgeHeat}">${opp.edge >= 0 ? '+' : ''}${fmtPct(opp.edge)}</span>`
+    : '';
 
   return `
-    <article class="ev-card ${cardClass} fade-in">
-      <div class="ev-card-header">
-        <div>
-          <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
-          <div class="ev-match-meta">${escapeHtml(marketLabel)} ${escapeHtml(kickoff)}${escapeHtml(oddsAge)}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:.5rem">
-          <div class="confidence-ring" data-level="${confLevel}" title="Confianza: ${opp.confidenceScore != null ? fmtNum(opp.confidenceScore) : '—'}">
-            ${confLevel === 'high' ? '✓' : confLevel === 'medium' ? '~' : '?'}
-          </div>
-          ${decisionStatusChip(opp.decisionStatus)}
-        </div>
-      </div>
-      ${probBars(opp.modelProb, opp.marketProb)}
-      <div class="ev-metrics-row">
-        ${fairOddsStr ? `<div class="ev-metric-pill"><b>${escapeHtml(fairOddsStr)}</b></div>` : ''}
-        ${bookOddsStr ? `<div class="ev-metric-pill"><b>${escapeHtml(bookOddsStr)}</b></div>` : ''}
-        ${opp.edge != null ? `<div class="ev-metric-pill"><b class="${evHeat}">${fmtPct(opp.edge)}</b><span>edge</span></div>` : ''}
-        ${opp.ev != null ? `<div class="ev-metric-pill"><b class="${evHeat}">${fmtPct(opp.ev)}</b><span>EV</span></div>` : ''}
-        ${opp.kellyFraction != null ? `<div class="ev-metric-pill"><b>${fmtPct(opp.kellyFraction)}</b><span>Kelly</span></div>` : ''}
-        ${opp.confidenceScore != null ? `<div class="ev-metric-pill"><b>${fmtNum(opp.confidenceScore)}</b><span>conf</span></div>` : ''}
-      </div>
-      ${opp.blockReasons.length ? `<div class="block-chips">${opp.blockReasons.map((r) => `<span class="chip chip--muted">${escapeHtml(BLOCK_REASON_LABELS[r] || r)}</span>`).join('')}</div>` : ''}
-    </article>`;
+    <tr class="ev-row ${rowClass} fade-in">
+      <td class="ev-td-match">
+        <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
+        <div class="ev-match-date">${escapeHtml(kickoff)}</div>
+      </td>
+      <td class="ev-td-market">${escapeHtml(opp.marketCode || '—')}</td>
+      <td class="ev-td-sel"><b>${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</b></td>
+      <td class="ev-td-num">${opp.modelProb != null ? `<b>${fmtPct(opp.modelProb)}</b>` : '—'}</td>
+      <td class="ev-td-num ev-market-prob">${opp.marketProb != null ? fmtPct(opp.marketProb) : '—'}</td>
+      <td class="ev-td-odds">${fairArrow}${overlay}</td>
+      <td class="ev-td-num ${edgeHeat}">${opp.edge != null ? `${opp.edge >= 0 ? '+' : ''}${(opp.edge * 100).toFixed(1)}pp` : '—'}</td>
+      <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}</td>
+      <td class="ev-td-num">${opp.kellyFraction != null ? `${fmtPct(opp.kellyFraction)}<br><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'BETTABLE' : opp.decisionStatus === 'PAPER_ONLY' ? 'PAPER' : 'BLOCK'}</span>` : '—'}</td>
+    </tr>`;
 }
 
 function evSummaryBar(opportunities, blocked) {
@@ -1078,12 +1069,22 @@ async function renderEV(options = {}) {
   const positiveEV = opportunities.filter((o) => (o.ev ?? 0) > 0);
   const negativeEV = opportunities.filter((o) => (o.ev ?? 0) <= 0 && o.decisionStatus !== 'BLOCKED');
 
+  const EV_TABLE_HEAD = `<thead><tr class="ev-thead-row">
+    <th>PARTIDO</th><th>MERCADO</th><th>SELECCIÓN</th>
+    <th title="Probabilidad del modelo">MODELO</th>
+    <th title="Probabilidad implícita de mercado">MERCADO</th>
+    <th>CUOTA JUSTA → LIBRO</th>
+    <th title="Edge = Prob.modelo – Prob.mercado">EDGE</th>
+    <th title="EV = Prob.modelo × cuota – 1">EV</th>
+    <th>KELLY%</th>
+  </tr></thead>`;
+
   const oppsHtml = positiveEV.length
-    ? `<div class="ev-grid">${positiveEV.map(evOpportunityCard).join('')}</div>`
+    ? `<div class="ev-table-wrap"><table class="ev-table">${EV_TABLE_HEAD}<tbody>${positiveEV.map(evOpportunityRow).join('')}</tbody></table></div>`
     : quantEmptyState('📊', 'Sin oportunidades EV+', 'El pipeline no encontró edge positivo en el mercado actual. Las oportunidades aparecen cuando el modelo ve valor vs las odds del libro.');
 
   const overpricedHtml = negativeEV.length
-    ? `<div class="ev-grid">${negativeEV.map((o) => evOpportunityCard({ ...o, decisionStatus: 'BLOCKED' })).join('')}</div>`
+    ? `<div class="ev-table-wrap"><table class="ev-table">${EV_TABLE_HEAD}<tbody>${negativeEV.map((o) => evOpportunityRow({ ...o, decisionStatus: 'BLOCKED' })).join('')}</tbody></table></div>`
     : quantEmptyState('✅', 'Sin mercados sobrepreciados', 'No hay selecciones con EV negativo en este momento.');
 
   const calibrationNote = positiveEV.length && positiveEV.every((o) => o.predictionStatus === 'RAW_ONLY')
