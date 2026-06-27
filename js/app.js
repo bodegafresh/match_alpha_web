@@ -247,7 +247,8 @@ function applyCompetitionLayout() {
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
   });
-  if (!navByView[state.view]) {
+  const QUANT_VIEWS = new Set(['ev', 'model', 'stats']);
+  if (!navByView[state.view] && !QUANT_VIEWS.has(state.view)) {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
