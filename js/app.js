@@ -1654,38 +1654,14 @@ async function renderStats(options = {}) {
 
 // ─── News view ───────────────────────────────────────────────────────────────
 
-const NEWS_PROXY = 'https://corsproxy.io/?url=';
-
-async function fetchTeamNews(teamName) {
-  const q = encodeURIComponent(`FIFA World Cup 2026 ${teamName}`);
-  const rssUrl = `https://news.google.com/rss/search?q=${q}&hl=es&gl=US&ceid=US:es`;
-  try {
-    const r = await fetch(NEWS_PROXY + encodeURIComponent(rssUrl), { signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return [];
-    const text = await r.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, 'application/xml');
-    const items = [...doc.querySelectorAll('item')].slice(0, 6);
-    const seen = new Set();
-    return items.flatMap(item => {
-      const title = item.querySelector('title')?.textContent?.trim() || '';
-      const link  = item.querySelector('link')?.nextSibling?.textContent?.trim()
-                 || item.querySelector('link')?.textContent?.trim() || '#';
-      const pub   = item.querySelector('pubDate')?.textContent?.trim() || '';
-      const src   = item.querySelector('source')?.textContent?.trim() || 'Google News';
-      if (!title || seen.has(title)) return [];
-      seen.add(title);
-      return [{ title, url: link, source: src, published_at: pub, team: teamName }];
-    });
-  } catch { return []; }
-}
-
 function newsArticleCard(article) {
   const title = escapeHtml(article.title || '');
   const source = escapeHtml(article.source || '');
   const url = article.url || '#';
   const pub = article.published_at ? timeLabel(article.published_at) : '';
-  const team = article.team ? `<span class="news-team-tag">${escapeHtml(article.team)}</span>` : '';
+  const team = article.home_team || article.away_team
+    ? `<span class="news-team-tag">${escapeHtml(article.home_team || article.away_team)}</span>`
+    : '';
   return `<a class="news-article" href="${url}" target="_blank" rel="noopener noreferrer">
     <div class="news-article__header">${team}<span class="news-article__meta">${source}${pub ? ` · ${pub}` : ''}</span></div>
     <span class="news-article__title">${title}</span>
@@ -1693,43 +1669,15 @@ function newsArticleCard(article) {
   </a>`;
 }
 
-function newsMatchBlock(match, articles) {
-  const home = escapeHtml(match.home_team || '');
-  const away = escapeHtml(match.away_team || '');
-  const kickoff = match.kickoff_at ? timeLabel(match.kickoff_at) : '';
-  const aiChip = match.ai_context_used
-    ? `<span class="chip chip--ai" title="La IA usó noticias para ajustar este pronóstico">IA activa</span>`
-    : '';
-  const statusMap = { FINISHED: 'Finalizado', LIVE: '🔴 En vivo', SCHEDULED: '' };
-  const statusLabel = statusMap[match.status] || '';
-  const articlesHtml = articles.length
-    ? `<div class="news-grid">${articles.map(newsArticleCard).join('')}</div>`
-    : `<p class="news-empty">Sin noticias recientes para este partido.</p>`;
-
-  return `<section class="news-match-block fade-in">
-    <div class="news-match-header">
-      <span class="news-match-teams">${home} <span class="news-vs">vs</span> ${away}</span>
-      <div class="news-match-meta">
-        ${statusLabel ? `<span class="chip chip--muted">${escapeHtml(statusLabel)}</span>` : ''}
-        <span class="chip chip--muted">${escapeHtml(kickoff)}</span>
-        ${aiChip}
-      </div>
-    </div>
-    ${articlesHtml}
-  </section>`;
-}
-
 async function renderNews(options = {}) {
   root.innerHTML = skeletonCards(3);
 
-  // 1. Get today's matches from backend (fast, no external calls)
   let matches = [];
   try {
     const resp = await apiGet('web/news', {}, options.signal);
     matches = resp?.data?.matches_news || [];
   } catch (e) {
     if (e.name === 'AbortError') return;
-    // If backend fails, still try to show UI — matches list empty
   }
 
   if (!matches.length) {
@@ -1737,58 +1685,36 @@ async function renderNews(options = {}) {
     return;
   }
 
-  // 2. Render shell immediately so user sees match blocks
+  const matchBlocks = matches.map(m => {
+    const aiChip = m.ai_context_used
+      ? `<span class="chip chip--ai" title="La IA usó estas noticias en su pronóstico">IA activa</span>`
+      : '';
+    const articlesHtml = (m.news || []).length
+      ? `<div class="news-grid">${(m.news || []).map(newsArticleCard).join('')}</div>`
+      : `<p class="news-empty">Sin noticias — se sincronizarán mañana a las 6 AM.</p>`;
+
+    return `<section class="news-match-block fade-in">
+      <div class="news-match-header">
+        <span class="news-match-teams">${escapeHtml(m.home_team)} <span class="news-vs">vs</span> ${escapeHtml(m.away_team)}</span>
+        <div class="news-match-meta">
+          <span class="chip chip--muted">${timeLabel(m.kickoff_at)}</span>
+          ${aiChip}
+        </div>
+      </div>
+      ${articlesHtml}
+    </section>`;
+  });
+
   root.innerHTML = `
     <div class="news-view">
       <div class="news-header">
         <h2 class="section-title">Noticias del día</h2>
-        <p class="news-subtitle">Noticias de Google News para los equipos con partidos hoy.
+        <p class="news-subtitle">Noticias sincronizadas cada mañana desde Google News vía GAS.
           Las marcadas con <strong style="color:var(--ai)">IA activa</strong>
           fueron consideradas en los pronósticos del modelo.</p>
       </div>
-      ${matches.map(m => `
-        <section class="news-match-block fade-in" id="news-match-${m.match_id}">
-          <div class="news-match-header">
-            <span class="news-match-teams">${escapeHtml(m.home_team)} <span class="news-vs">vs</span> ${escapeHtml(m.away_team)}</span>
-            <div class="news-match-meta">
-              <span class="chip chip--muted">${timeLabel(m.kickoff_at)}</span>
-              ${m.ai_context_used ? `<span class="chip chip--ai">IA activa</span>` : ''}
-            </div>
-          </div>
-          <div class="news-articles-placeholder">
-            <span class="news-loading">Cargando noticias…</span>
-          </div>
-        </section>`).join('')}
+      ${matchBlocks.join('')}
     </div>`;
-
-  // 3. Fetch news per team concurrently (client-side via CORS proxy)
-  const teamSet = new Map();
-  matches.forEach(m => {
-    teamSet.set(m.home_team, m.home_team);
-    teamSet.set(m.away_team, m.away_team);
-  });
-  const teamNames = [...teamSet.keys()];
-  const newsResults = await Promise.allSettled(teamNames.map(t => fetchTeamNews(t)));
-  const newsByTeam = {};
-  teamNames.forEach((name, i) => {
-    newsByTeam[name] = newsResults[i].status === 'fulfilled' ? newsResults[i].value : [];
-  });
-
-  // 4. Populate each match block with fetched articles
-  matches.forEach(m => {
-    const block = document.getElementById(`news-match-${m.match_id}`);
-    if (!block) return;
-    const seen = new Set();
-    const combined = [...(newsByTeam[m.home_team] || []), ...(newsByTeam[m.away_team] || [])]
-      .filter(a => { if (seen.has(a.title)) return false; seen.add(a.title); return true; })
-      .slice(0, 8);
-    const placeholder = block.querySelector('.news-articles-placeholder');
-    if (placeholder) {
-      placeholder.outerHTML = combined.length
-        ? `<div class="news-grid">${combined.map(newsArticleCard).join('')}</div>`
-        : `<p class="news-empty">Sin noticias recientes.</p>`;
-    }
-  });
 }
 
 async function render(options = {}) {
