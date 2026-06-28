@@ -1158,7 +1158,7 @@ function adaptEVOpportunity(raw) {
     edge: Number(raw.edge) || null,
     ev: Number(raw.ev) || null,
     kellyFraction: Number(raw.kelly_fraction) || null,
-    confidenceScore: raw.confidence_score,
+    confidenceScore: raw.confidence_score != null ? Math.min(Number(raw.confidence_score), 1) : null,
     decisionStatus: raw.decision_status,
     predictionStatus: raw.prediction_status,
     blockReasons: Array.isArray(raw.block_reasons) ? raw.block_reasons : (raw.block_reason ? [raw.block_reason] : []),
