@@ -1701,7 +1701,7 @@ async function renderNews(options = {}) {
   let matches = [];
   try {
     const resp = await apiGet('web/news', {}, options.signal);
-    matches = resp?.data?.matches_news || [];
+    matches = resp?.matches_news || [];
   } catch (e) {
     if (e.name === 'AbortError') return;
   }
