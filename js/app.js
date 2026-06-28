@@ -1253,6 +1253,46 @@ function fmtNum(value, decimals = 2) {
   return Number(value).toFixed(decimals);
 }
 
+function evHeroCard(opp) {
+  if (!opp) return '';
+  const evHeat = opp.ev > 0.10 ? 'ev-value--hot' : opp.ev > 0.05 ? 'ev-value--warm' : 'ev-value--cold';
+  const confPct = opp.confidenceScore != null ? Math.round(opp.confidenceScore * 100) : null;
+  const confLevel = confPct != null ? (confPct >= 65 ? 'high' : confPct >= 35 ? 'medium' : 'low') : 'low';
+  return `
+    <div class="ev-hero-card fade-in">
+      <div class="ev-hero-badge">⚡ Mejor oportunidad del día</div>
+      <div class="ev-hero-body">
+        <div class="ev-hero-match">
+          <div class="ev-hero-match-label">${escapeHtml(opp.matchLabel)}</div>
+          <div class="ev-hero-match-date">${escapeHtml(opp.kickoffAt ? chileDateTimeLabel(opp.kickoffAt) : '')}</div>
+        </div>
+        <div class="ev-hero-metrics">
+          <div class="ev-hero-metric">
+            <span class="ev-hero-metric__value ${evHeat}">${fmtPct(opp.ev)}</span>
+            <span class="ev-hero-metric__label">EV</span>
+          </div>
+          <div class="ev-hero-metric">
+            <span class="ev-hero-metric__value">${fmtPct(opp.edge)}</span>
+            <span class="ev-hero-metric__label">Edge</span>
+          </div>
+          <div class="ev-hero-metric">
+            <span class="ev-hero-metric__value">${opp.decimalOdds ? fmtNum(opp.decimalOdds) : '—'}</span>
+            <span class="ev-hero-metric__label">Cuota</span>
+          </div>
+          <div class="ev-hero-metric">
+            <span class="ev-hero-metric__value">${fmtPct(opp.kellyFraction)}</span>
+            <span class="ev-hero-metric__label">Kelly%</span>
+          </div>
+        </div>
+        <div class="ev-hero-tags">
+          <span class="chip chip--warn">${escapeHtml(opp.marketCode || '1X2')}</span>
+          <span class="chip chip--blue">${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</span>
+          ${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confidence: ${confPct}%">${confPct}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
 function evOpportunityRow(opp) {
   const isOutlier = (opp.ev != null && opp.ev > 0.40) || opp.blockReasons.includes('EV_OUTLIER');
   const rowClass = isOutlier ? 'ev-row--blocked'
@@ -1266,6 +1306,9 @@ function evOpportunityRow(opp) {
   const edgeHeat = opp.edge != null
     ? (opp.edge > 0.05 ? 'ev-value--hot' : opp.edge > 0.02 ? 'ev-value--warm' : opp.edge < 0 ? 'ev-value--neg' : 'ev-value--cold')
     : '';
+
+  const confPct = opp.confidenceScore != null ? Math.round(opp.confidenceScore * 100) : null;
+  const confLevel = confPct != null ? (confPct >= 65 ? 'high' : confPct >= 35 ? 'medium' : 'low') : 'low';
 
   const kickoff = opp.kickoffAt ? chileDateTimeLabel(opp.kickoffAt) : '';
   const fairArrow = opp.fairOdds && opp.decimalOdds
@@ -1289,6 +1332,7 @@ function evOpportunityRow(opp) {
       <td class="ev-td-num ${edgeHeat}">${opp.edge != null ? `${opp.edge >= 0 ? '+' : ''}${(opp.edge * 100).toFixed(1)}pp` : '—'}</td>
       <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}${isOutlier ? ' <span class="chip chip--muted" title="EV outlier — modelo descalibrado">OUTLIER</span>' : ''}</td>
       <td class="ev-td-num">${opp.kellyFraction != null ? `${fmtPct(opp.kellyFraction)}<br><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'BETTABLE' : opp.decisionStatus === 'PAPER_ONLY' ? 'PAPER' : 'BLOCK'}</span>` : '—'}</td>
+      <td class="ev-td-num">${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confidence: ${confPct}%">${confPct}</div>` : '—'}</td>
     </tr>`;
 }
 
@@ -1388,6 +1432,7 @@ async function renderEV(options = {}) {
     <th title="Edge = Prob.modelo – Prob.mercado">EDGE</th>
     <th title="EV = Prob.modelo × cuota – 1">EV</th>
     <th>KELLY%</th>
+    <th title="Confidence score del modelo (0-100)">CONF.</th>
   </tr></thead>`;
 
   const oppsHtml = positiveEV.length
@@ -1402,9 +1447,12 @@ async function renderEV(options = {}) {
     ? quantEmptyState('🔬', 'Modelo RAW_ONLY', 'El modelo aún no está calibrado. Se necesitan 30+ picks settled para calibrar. Las oportunidades mostradas son paper-only.')
     : '';
 
+  const bestOpp = positiveEV.length ? positiveEV.reduce((a, b) => ((b.ev ?? 0) > (a.ev ?? 0) ? b : a)) : null;
+
   root.innerHTML = `
     <div class="ev-view">
       ${evSummaryBar(opportunities, blocked)}
+      ${evHeroCard(bestOpp)}
       ${calibrationNote}
       <section>
         <div class="ev-section-title">▲ Oportunidades con Edge</div>
@@ -1426,20 +1474,29 @@ async function renderEV(options = {}) {
 // ─── Model view ────────────────────────────────────────────────────────────
 
 const FEATURE_HEALTH = [
-  { key: 'elo',       label: 'ELO ratings',         status: 'ok' },
-  { key: 'form',      label: 'Forma reciente',       status: 'ok' },
-  { key: 'odds',      label: 'Odds / Mercado',       status: 'ok' },
-  { key: 'lineups',   label: 'Lineups confirmados',  status: 'pending' },
-  { key: 'weather',   label: 'Clima / Condiciones',  status: 'ok' },
-  { key: 'xg',        label: 'xG histórico',         status: 'pending' },
-  { key: 'news',      label: 'Noticias / Lesiones',  status: 'ok' },
+  { key: 'elo',      label: 'ELO ratings',        status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'ELO Global, Internacional y Doméstico calculados incrementalmente' },
+  { key: 'form',     label: 'Forma reciente',      status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'Últimos 5 partidos: puntos, diferencia de goles' },
+  { key: 'odds',     label: 'Odds / Mercado',      status: 'ok',      freshness: 'Variable', coverage: '80%',  detail: 'Cuotas pre-kickoff capturadas. Sin API key: odds del bootstrap Excel' },
+  { key: 'lineups',  label: 'Lineups confirmados', status: 'pending', freshness: '—',        coverage: '0%',   detail: 'Pendiente: integración con fuente de alineaciones (Phase 2)' },
+  { key: 'weather',  label: 'Clima / Condiciones', status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'Google News RSS activo, sin API key requerida' },
+  { key: 'xg',       label: 'xG histórico',        status: 'pending', freshness: '—',        coverage: '0%',   detail: 'Pendiente: fuente de datos xG (Phase 2)' },
+  { key: 'news',     label: 'Noticias / Lesiones', status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'Google News RSS activo' },
 ];
 
 function featureHealthGrid() {
   return `<div class="feature-health-grid">${FEATURE_HEALTH.map((f) => {
-    const dotCls = f.status === 'ok' ? 'health-dot--ok' : f.status === 'partial' ? 'health-dot--partial' : f.status === 'na' ? 'health-dot--na' : 'health-dot--pending';
-    const label = f.status === 'ok' ? 'OK' : f.status === 'partial' ? 'Parcial' : f.status === 'na' ? 'N/A' : 'Pendiente';
-    return `<div class="feature-health-item"><span class="health-dot ${dotCls}"></span><span>${escapeHtml(f.label)}</span><span class="chip chip--muted" style="margin-left:auto;font-size:.62rem">${label}</span></div>`;
+    const dotCls = f.status === 'ok' ? 'health-dot--ok' : f.status === 'partial' ? 'health-dot--partial' : 'health-dot--pending';
+    const chipCls = f.status === 'ok' ? 'chip--ok' : f.status === 'partial' ? 'chip--warn' : 'chip--muted';
+    const chipLabel = f.status === 'ok' ? 'OK' : f.status === 'partial' ? 'Parcial' : 'Pendiente';
+    return `
+      <div class="feature-health-item" title="${escapeHtml(f.detail)}">
+        <span class="health-dot ${dotCls}"></span>
+        <div class="feature-health-meta">
+          <span class="feature-health-name">${escapeHtml(f.label)}</span>
+          <span class="feature-health-sub">${escapeHtml(f.freshness)} · ${escapeHtml(f.coverage)}</span>
+        </div>
+        <span class="chip ${chipCls}" style="margin-left:auto;font-size:.62rem;flex-shrink:0">${chipLabel}</span>
+      </div>`;
   }).join('')}</div>`;
 }
 
@@ -1495,6 +1552,61 @@ function calibrationSummaryText(calibration) {
     <p style="font-size:.78rem;color:var(--muted);margin:.6rem 0 0">Si el modelo dice 40%, debería ocurrir ~40% de las veces (ver Stats para gráfico completo)</p>`;
 }
 
+function calibrationProgressBar(calibration) {
+  const settled = calibration.length ? (calibration[0].n_settled ?? calibration[0].sample_size ?? calibration[0].total_predictions ?? 0) : 0;
+  const target = 30;
+  const pct = Math.min(100, Math.round((settled / target) * 100));
+  const ready = settled >= target;
+  return `
+    <div class="cal-progress-wrap">
+      <div class="cal-progress-header">
+        <span class="cal-progress-title">Progreso de calibración</span>
+        <span class="cal-progress-count${ready ? ' cal-progress-count--ready' : ''}">${settled}/${target} picks settled</span>
+      </div>
+      <div class="cal-progress-track">
+        <div class="cal-progress-fill${ready ? ' cal-progress-fill--ready' : ''}" style="width:${pct}%"></div>
+      </div>
+      <div class="cal-progress-note">${ready ? '✓ Modelo listo para calibración automática' : `Faltan ${target - settled} picks resueltos para calibrar el modelo`}</div>
+    </div>`;
+}
+
+function whatDoesThisMeanSection() {
+  return `
+    <div class="what-means-section">
+      <h3 class="what-means-title">¿Qué significa todo esto?</h3>
+      <div class="what-means-grid">
+        <div class="what-means-item">
+          <span class="what-means-icon">📊</span>
+          <div>
+            <strong>EV (Expected Value)</strong>
+            <p>Si el modelo dice 40% y la cuota implica 30%, hay +10pp de edge. EV = prob_modelo × cuota_decimal − 1. EV positivo = valor a largo plazo.</p>
+          </div>
+        </div>
+        <div class="what-means-item">
+          <span class="what-means-icon">🎯</span>
+          <div>
+            <strong>Kelly%</strong>
+            <p>Fracción óptima del bankroll a apostar según Kelly Criterion. Usamos Kelly×25% para reducir varianza. Nunca apostar el Kelly completo.</p>
+          </div>
+        </div>
+        <div class="what-means-item">
+          <span class="what-means-icon">⚖️</span>
+          <div>
+            <strong>Calibración</strong>
+            <p>Un modelo calibrado que dice 60% gana ~60% del tiempo. Sin calibración, el EV puede estar sesgado. Se necesitan 30+ picks para calibrar.</p>
+          </div>
+        </div>
+        <div class="what-means-item">
+          <span class="what-means-icon">🔒</span>
+          <div>
+            <strong>PAPER vs BETTABLE</strong>
+            <p>PAPER = modelo aún no calibrado, solo seguimiento virtual. BETTABLE = modelo calibrado y confianza suficiente para apuesta real.</p>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function renderModel(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="model-view"><div class="loading-head"><span>Cargando Modelo</span><i></i></div></div>`;
@@ -1520,6 +1632,7 @@ async function renderModel(options = {}) {
       <section class="model-section">
         <h3>Estado del Modelo</h3>
         ${modelStatusCards(diagnostics)}
+        ${calibrationProgressBar(calibration)}
       </section>
       <section class="model-section">
         <h3>Calibración</h3>
@@ -1534,6 +1647,7 @@ async function renderModel(options = {}) {
         <p style="font-size:.78rem;color:var(--muted);margin:0 0 .8rem">Así aprende el sistema de cada partido:</p>
         ${feedbackTimeline()}
       </section>
+      ${whatDoesThisMeanSection()}
     </div>`;
 }
 
@@ -1632,6 +1746,41 @@ function statsKpiBar(calibration, buckets) {
     </div>`).join('')}</div>`;
 }
 
+function statsRoadmapEmpty() {
+  return `
+    <div class="stats-roadmap">
+      <div class="stats-roadmap-header">
+        <span class="stats-roadmap-icon">🗺️</span>
+        <div>
+          <strong>Stats disponibles cuando haya picks resueltos</strong>
+          <p>Las métricas históricas y gráficos aparecen automáticamente una vez que los partidos predichos terminen y se liquiden.</p>
+        </div>
+      </div>
+      <div class="stats-roadmap-steps">
+        <div class="stats-roadmap-step stats-roadmap-step--done">
+          <span class="stats-step-dot stats-step-dot--done">✓</span>
+          <div><strong>Modelo activo</strong><small>Pipeline corriendo, predicciones generadas</small></div>
+        </div>
+        <div class="stats-roadmap-step stats-roadmap-step--done">
+          <span class="stats-step-dot stats-step-dot--done">✓</span>
+          <div><strong>EV calculado</strong><small>Decisiones de apuesta calculadas</small></div>
+        </div>
+        <div class="stats-roadmap-step stats-roadmap-step--active">
+          <span class="stats-step-dot stats-step-dot--active">→</span>
+          <div><strong>Picks en juego</strong><small>Esperando que terminen los partidos predichos</small></div>
+        </div>
+        <div class="stats-roadmap-step">
+          <span class="stats-step-dot">◯</span>
+          <div><strong>Settlement automático</strong><small>Resultados registrados y picks liquidados</small></div>
+        </div>
+        <div class="stats-roadmap-step">
+          <span class="stats-step-dot">◯</span>
+          <div><strong>Stats y calibración</strong><small>Brier score, ROI, calibration chart disponibles</small></div>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function renderStats(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando Stats</span><i></i></div></div>`;
@@ -1654,8 +1803,11 @@ async function renderStats(options = {}) {
 
   setStatus('Stats', `${decisions.length} picks`);
 
+  const hasData = decisions.length > 0 || calibration.length > 0;
+
   root.innerHTML = `
     <div class="stats-view">
+      ${!hasData ? statsRoadmapEmpty() : `
       <section class="stats-section">
         <h3>KPIs del Modelo</h3>
         ${statsKpiBar(calibration, buckets)}
@@ -1671,11 +1823,11 @@ async function renderStats(options = {}) {
       <section class="stats-section">
         <h3>Picks por Estado</h3>
         ${picksByStatusChart(decisions)}
-      </section>
+      </section>`}
     </div>`;
 
-  // Init charts after DOM painted
-  setTimeout(() => {
+  // Init charts after DOM painted (only if data exists)
+  if (hasData) setTimeout(() => {
     initCalibrationChart(calibration);
     initRoiChart(buckets);
     initPicksDonut(decisions);

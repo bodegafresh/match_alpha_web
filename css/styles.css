@@ -1436,3 +1436,87 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .knockout-nav-btn, .knockout-progress, .knockout-tabs { display: none !important; }
   .knockout-list { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 12px !important; }
 }
+
+/* ═══════ EV Hero Card ═══════ */
+.ev-hero-card {
+  background: linear-gradient(135deg, rgba(245, 200, 66, .08), var(--surface-2));
+  border: 1px solid rgba(245, 200, 66, .22);
+  border-radius: var(--r-xl); padding: 1.1rem 1.3rem;
+  box-shadow: var(--glow-gold), var(--elev-2);
+}
+.ev-hero-badge {
+  font-size: .68rem; font-weight: 800; letter-spacing: .06em;
+  color: var(--accent); text-transform: uppercase; margin-bottom: .7rem;
+}
+.ev-hero-body { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.ev-hero-match { flex: 1; min-width: 160px; }
+.ev-hero-match-label { font-size: .9rem; font-weight: 700; color: var(--text); }
+.ev-hero-match-date  { font-size: .7rem; color: var(--muted); margin-top: .15rem; }
+.ev-hero-metrics { display: flex; gap: 1.2rem; }
+.ev-hero-metric { text-align: center; }
+.ev-hero-metric__value { display: block; font-size: 1.3rem; font-weight: 800; color: var(--text); line-height: 1; }
+.ev-hero-metric__label { font-size: .6rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.ev-hero-tags { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+
+/* ═══════ Calibration Progress Bar ═══════ */
+.cal-progress-wrap {
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: .9rem 1rem; margin-top: .5rem;
+}
+.cal-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .55rem; }
+.cal-progress-title { font-size: .78rem; font-weight: 700; color: var(--text); }
+.cal-progress-count { font-size: .72rem; color: var(--muted); font-weight: 600; }
+.cal-progress-count--ready { color: var(--ok); }
+.cal-progress-track {
+  height: 8px; border-radius: 100px;
+  background: rgba(255, 255, 255, .06); overflow: hidden;
+}
+.cal-progress-fill {
+  height: 100%; border-radius: 100px;
+  background: linear-gradient(90deg, var(--accent-2), rgba(46, 196, 247, .4));
+  transition: width .6s var(--ease);
+}
+.cal-progress-fill--ready { background: linear-gradient(90deg, var(--ok), rgba(24, 217, 106, .5)); }
+.cal-progress-note { font-size: .68rem; color: var(--muted); margin-top: .45rem; }
+
+/* ═══════ What Does This Mean ═══════ */
+.what-means-section {
+  background: var(--surface-1); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 1rem 1.15rem;
+}
+.what-means-title { font-size: .82rem; font-weight: 800; color: var(--text); margin: 0 0 .85rem; }
+.what-means-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.what-means-item { display: flex; gap: .65rem; align-items: flex-start; }
+.what-means-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: .05rem; }
+.what-means-item strong { display: block; font-size: .78rem; font-weight: 700; color: var(--text); margin-bottom: .2rem; }
+.what-means-item p { font-size: .72rem; color: var(--muted); margin: 0; line-height: 1.5; }
+@media (max-width: 680px) { .what-means-grid { grid-template-columns: 1fr; } }
+
+/* ═══════ Advanced Feature Health ═══════ */
+.feature-health-meta { display: flex; flex-direction: column; gap: .05rem; flex: 1; min-width: 0; }
+.feature-health-name { font-size: .8rem; font-weight: 600; color: var(--text); }
+.feature-health-sub  { font-size: .66rem; color: var(--faint); }
+
+/* ═══════ Stats Roadmap ═══════ */
+.stats-roadmap {
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 1.1rem 1.2rem;
+}
+.stats-roadmap-header { display: flex; gap: .75rem; align-items: flex-start; margin-bottom: 1rem; }
+.stats-roadmap-icon { font-size: 1.5rem; flex-shrink: 0; }
+.stats-roadmap-header strong { display: block; font-size: .82rem; font-weight: 700; color: var(--text); margin-bottom: .2rem; }
+.stats-roadmap-header p { font-size: .74rem; color: var(--muted); margin: 0; line-height: 1.5; }
+.stats-roadmap-steps { display: flex; flex-direction: column; gap: .55rem; }
+.stats-roadmap-step { display: flex; gap: .65rem; align-items: flex-start; }
+.stats-roadmap-step--done   { opacity: .7; }
+.stats-roadmap-step--active strong { color: var(--accent-2); }
+.stats-step-dot {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-size: .7rem; font-weight: 700;
+  background: var(--surface-3); border: 1px solid var(--line-2);
+  color: var(--faint); margin-top: .1rem;
+}
+.stats-step-dot--done   { background: rgba(24, 217, 106, .14); border-color: rgba(24, 217, 106, .3); color: var(--ok); }
+.stats-step-dot--active { background: rgba(46, 196, 247, .14); border-color: rgba(46, 196, 247, .3); color: var(--accent-2); }
+.stats-roadmap-step strong { font-size: .78rem; font-weight: 700; color: var(--text); display: block; }
+.stats-roadmap-step small  { font-size: .7rem; color: var(--muted); }
