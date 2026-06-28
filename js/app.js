@@ -2162,17 +2162,14 @@ function switchSeason(slug) {
     if (e.key === 'Escape' && isOpen) closePicker();
   });
 
-  // Update label from layout once loaded
-  const origEnsureLayout = ensureLayout;
-  // Label is updated in applyCompetitionLayout() already via .brand p
-  // We just sync it to the picker button label too
+  // Label is kept in sync by applyCompetitionLayout().
+  // Do an initial safe sync without observing the full DOM.
   const labelEl = document.getElementById('league-picker-label');
   if (labelEl) {
-    const observer = new MutationObserver(() => {
-      const name = competitionLabel();
-      if (name && name !== SEASON) labelEl.textContent = name;
-    });
-    observer.observe(document.body, { subtree: true, characterData: true, childList: true });
+    const name = competitionLabel();
+    if (name && labelEl.textContent !== name) {
+      labelEl.textContent = name;
+    }
   }
 })();
 
