@@ -2128,6 +2128,12 @@ function switchSeason(slug) {
   const dropdown = document.getElementById('league-picker-dropdown');
   if (!btn || !dropdown) return;
 
+  // Keep the dropdown at document root so it is not affected by topbar
+  // stacking/overflow behavior on small screens.
+  if (dropdown.parentElement !== document.body) {
+    document.body.appendChild(dropdown);
+  }
+
   let isOpen = false;
 
   function positionPicker() {

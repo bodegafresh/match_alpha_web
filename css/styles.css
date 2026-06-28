@@ -157,7 +157,7 @@ a { color: var(--accent-2); }
   border: 1px solid rgba(255,255,255,.18);
   border-radius: var(--r-md, 14px);
   box-shadow: var(--elev-3, 0 20px 60px rgba(0,0,0,.5));
-  z-index: 200;
+  z-index: 1000;
   scrollbar-width: thin; scrollbar-color: var(--line) transparent;
   animation: fade-up 140ms var(--ease, ease) both;
 }
@@ -1340,7 +1340,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .topbar {
     grid-template-columns: 1fr;
     padding: .5rem .75rem .55rem;
-    gap: .4rem; overflow: hidden;
+    gap: .4rem; overflow: visible;
   }
   .brand { gap: .55rem; }
   .brand-mark { width: 32px; height: 32px; font-size: .72rem; border-radius: 9px; }
