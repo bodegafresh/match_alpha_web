@@ -1309,7 +1309,7 @@ function evSummaryBar(opportunities, blocked) {
     { label: 'Bloqueados', value: blocked.length, cls: '' },
     { label: 'EV promedio', value: avgEV != null ? fmtPct(avgEV) : '—', cls: avgEV > 0 ? 'metric-card--ok' : '' },
     { label: 'Kelly prom.', value: avgKelly != null ? fmtPct(avgKelly) : '—', cls: '' },
-    { label: 'Confianza', value: avgConf != null ? fmtNum(avgConf) : '—', cls: '' },
+    { label: 'Confianza', value: avgConf != null ? fmtPct(avgConf) : '—', cls: avgConf != null && avgConf >= 0.6 ? 'metric-card--ok' : avgConf != null && avgConf >= 0.3 ? 'metric-card--warn' : '' },
   ];
   return `<div class="ev-summary-bar">${cards.map((c) => `
     <div class="metric-card ${c.cls}">
