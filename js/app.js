@@ -1147,7 +1147,7 @@ function placeholderKnockoutCard(stage, index) {
 function adaptEVOpportunity(raw) {
   return {
     id: raw.betting_decision_id,
-    matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name].filter(Boolean).join(' ') || raw.match_id,
+    matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name || raw.away_slot_label || '???'].filter(Boolean).join(' ') || raw.match_id,
     kickoffAt: raw.kickoff_at,
     marketCode: raw.market_code || '',
     selectionCode: raw.selection_code || '',
@@ -1155,9 +1155,9 @@ function adaptEVOpportunity(raw) {
     marketProb: raw.market_probability ?? raw.market_implied_probability,
     decimalOdds: raw.decimal_odds,
     fairOdds: raw.model_probability ? (1 / raw.model_probability) : null,
-    edge: raw.edge,
-    ev: raw.ev,
-    kellyFraction: raw.kelly_fraction,
+    edge: Number(raw.edge) || null,
+    ev: Number(raw.ev) || null,
+    kellyFraction: Number(raw.kelly_fraction) || null,
     confidenceScore: raw.confidence_score,
     decisionStatus: raw.decision_status,
     predictionStatus: raw.prediction_status,
@@ -1171,14 +1171,14 @@ function adaptEVOpportunity(raw) {
 function adaptBlockedDecision(raw) {
   return {
     id: raw.betting_decision_id,
-    matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name].filter(Boolean).join(' ') || raw.match_id,
+    matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name || raw.away_slot_label || '???'].filter(Boolean).join(' ') || raw.match_id,
     kickoffAt: raw.kickoff_at,
     marketCode: raw.market_code || '',
     selectionCode: raw.selection_code || '',
     decisionStatus: raw.decision_status,
     blockReasons: Array.isArray(raw.block_reasons) ? raw.block_reasons : (raw.block_reason ? [raw.block_reason] : []),
-    ev: raw.ev,
-    edge: raw.edge,
+    ev: Number(raw.ev) || null,
+    edge: Number(raw.edge) || null,
     confidenceScore: raw.confidence_score,
   };
 }
