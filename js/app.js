@@ -1244,7 +1244,7 @@ function probBars(modelProb, marketProb) {
 }
 
 function fmtPct(value) {
-  if (value == null) return '—';
+  if (value == null || isNaN(Number(value))) return '—';
   return `${(Number(value) * 100).toFixed(1)}%`;
 }
 
@@ -1343,7 +1343,7 @@ function evSummaryBar(opportunities, blocked) {
   const avgEV = evList.length ? evList.reduce((a, b) => a + b, 0) / evList.length : null;
   const kellyList = opportunities.map((o) => o.kellyFraction).filter((k) => k != null && !isNaN(k));
   const avgKelly = kellyList.length ? kellyList.reduce((a, b) => a + b, 0) / kellyList.length : null;
-  const confList = opportunities.map((o) => o.confidenceScore).filter((c) => c != null);
+  const confList = opportunities.map((o) => o.confidenceScore).filter((c) => c != null && !isNaN(Number(c)));
   const avgConf = confList.length ? confList.reduce((a, b) => a + b, 0) / confList.length : null;
 
   const cards = [
