@@ -1194,6 +1194,7 @@ const BLOCK_REASON_LABELS = {
   LEGACY_IMPORT: 'Importación legacy',
   ODDS_CAPTURED_AFTER_KICKOFF: 'Odds post-kickoff',
   PAPER_ONLY_BACKFILL: 'Backfill histórico',
+  EV_OUTLIER: 'EV outlier (modelo descalibrado)',
 };
 
 const BLOCK_REASON_DESC = {
@@ -1205,6 +1206,7 @@ const BLOCK_REASON_DESC = {
   LEGACY_IMPORT: 'Decisión importada de datos históricos. No ejecutable.',
   ODDS_CAPTURED_AFTER_KICKOFF: 'Las odds fueron capturadas después del inicio del partido.',
   PAPER_ONLY_BACKFILL: 'Decisión de backfill histórico. Solo para análisis.',
+  EV_OUTLIER: 'EV > 40% — estadísticamente imposible en mercados líquidos. Indica modelo descalibrado o datos de odds incorrectos.',
 };
 
 function quantEmptyState(icon, title, text) {
@@ -1252,7 +1254,9 @@ function fmtNum(value, decimals = 2) {
 }
 
 function evOpportunityRow(opp) {
-  const rowClass = opp.decisionStatus === 'BETTABLE' ? 'ev-row--bettable'
+  const isOutlier = (opp.ev != null && opp.ev > 0.40) || opp.blockReasons.includes('EV_OUTLIER');
+  const rowClass = isOutlier ? 'ev-row--blocked'
+    : opp.decisionStatus === 'BETTABLE' ? 'ev-row--bettable'
     : opp.decisionStatus === 'PAPER_ONLY' ? 'ev-row--paper'
     : 'ev-row--blocked';
 
@@ -1283,7 +1287,7 @@ function evOpportunityRow(opp) {
       <td class="ev-td-num ev-market-prob">${opp.marketProb != null ? fmtPct(opp.marketProb) : '—'}</td>
       <td class="ev-td-odds">${fairArrow}${overlay}</td>
       <td class="ev-td-num ${edgeHeat}">${opp.edge != null ? `${opp.edge >= 0 ? '+' : ''}${(opp.edge * 100).toFixed(1)}pp` : '—'}</td>
-      <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}</td>
+      <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}${isOutlier ? ' <span class="chip chip--muted" title="EV outlier — modelo descalibrado">OUTLIER</span>' : ''}</td>
       <td class="ev-td-num">${opp.kellyFraction != null ? `${fmtPct(opp.kellyFraction)}<br><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'BETTABLE' : opp.decisionStatus === 'PAPER_ONLY' ? 'PAPER' : 'BLOCK'}</span>` : '—'}</td>
     </tr>`;
 }
@@ -1291,9 +1295,9 @@ function evOpportunityRow(opp) {
 function evSummaryBar(opportunities, blocked) {
   const bettable = opportunities.filter((o) => o.decisionStatus === 'BETTABLE').length;
   const paper = opportunities.filter((o) => o.decisionStatus === 'PAPER_ONLY').length;
-  const evList = opportunities.map((o) => o.ev).filter((e) => e != null);
+  const evList = opportunities.map((o) => o.ev).filter((e) => e != null && !isNaN(e));
   const avgEV = evList.length ? evList.reduce((a, b) => a + b, 0) / evList.length : null;
-  const kellyList = opportunities.map((o) => o.kellyFraction).filter((k) => k != null);
+  const kellyList = opportunities.map((o) => o.kellyFraction).filter((k) => k != null && !isNaN(k));
   const avgKelly = kellyList.length ? kellyList.reduce((a, b) => a + b, 0) / kellyList.length : null;
   const confList = opportunities.map((o) => o.confidenceScore).filter((c) => c != null);
   const avgConf = confList.length ? confList.reduce((a, b) => a + b, 0) / confList.length : null;
