@@ -287,11 +287,11 @@ function applyCompetitionLayout() {
   if (!state.knockoutStage) {
     state.knockoutStage = knockoutStageDefinitions()[0]?.key || null;
   }
-  // Competition name from layout
+  // Sync competition label to league picker button
   const compName = competitionLabel();
   if (compName && compName !== SEASON) {
-    const brandEl = document.querySelector('.brand p');
-    if (brandEl && brandEl.textContent !== compName) brandEl.textContent = compName;
+    const labelEl = document.getElementById('league-picker-label');
+    if (labelEl && labelEl.textContent !== compName) labelEl.textContent = compName;
   }
 }
 
@@ -1949,5 +1949,214 @@ function refreshSilently() {
 if (AUTO_REFRESH_MS > 0) {
   state.refreshTimer = window.setInterval(refreshSilently, AUTO_REFRESH_MS);
 }
+
+// ── League picker ─────────────────────────────────────────────────────────────
+
+const COMPETITION_GROUPS = [
+  {
+    label: 'Mundiales',
+    icon: '🌍',
+    slugs: ['wc2026'],
+  },
+  {
+    label: 'Eliminatorias 2030',
+    icon: '🎯',
+    slugs: [
+      'conmebol-qualifiers-wc2030',
+      'uefa-qualifiers-wc2030',
+      'concacaf-qualifiers-wc2030',
+      'caf-qualifiers-wc2030',
+      'afc-qualifiers-wc2030',
+      'ofc-qualifiers-wc2030',
+    ],
+  },
+  {
+    label: 'Champions League',
+    icon: '⭐',
+    slugs: ['ucl-2026-2027', 'ucl-2025-2026'],
+  },
+  {
+    label: 'Ligas',
+    icon: '🏆',
+    slugs: ['chile-primera-2026', 'chile-apertura-2026', 'chile-clausura-2026', 'premier-league-2026-2027'],
+  },
+  {
+    label: 'Copas',
+    icon: '🏅',
+    slugs: ['libertadores-2026'],
+  },
+];
+
+const COMPETITION_ICONS = {
+  'wc2026': '🌍',
+  'conmebol-qualifiers-wc2030': '🇦🇷',
+  'uefa-qualifiers-wc2030': '🇪🇺',
+  'concacaf-qualifiers-wc2030': '🇲🇽',
+  'caf-qualifiers-wc2030': '🌍',
+  'afc-qualifiers-wc2030': '🌏',
+  'ofc-qualifiers-wc2030': '🌊',
+  'ucl-2026-2027': '⭐',
+  'ucl-2025-2026': '⭐',
+  'chile-primera-2026': '🇨🇱',
+  'chile-apertura-2026': '🇨🇱',
+  'chile-clausura-2026': '🇨🇱',
+  'premier-league-2026-2027': '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+  'libertadores-2026': '🏆',
+};
+
+let _catalogCache = null;
+
+// Static fallback: shown immediately while the API call resolves (or if it fails).
+// Keys must match catalog.py slugs. Add new competitions here when seeded.
+const STATIC_CATALOG_FALLBACK = {
+  'wc2026':                      { competition_season_slug: 'wc2026',                      name: 'FIFA World Cup',                  season_label: '2026',        region: 'Global' },
+  'conmebol-qualifiers-wc2030':  { competition_season_slug: 'conmebol-qualifiers-wc2030',  name: 'Eliminatorias Sudamericanas 2030', season_label: '2026–2029',   region: 'South America' },
+  'uefa-qualifiers-wc2030':      { competition_season_slug: 'uefa-qualifiers-wc2030',      name: 'Clasificación Europea 2030',      season_label: '2026–2029',   region: 'Europe' },
+  'concacaf-qualifiers-wc2030':  { competition_season_slug: 'concacaf-qualifiers-wc2030',  name: 'Clasificación CONCACAF 2030',     season_label: '2026–2029',   region: 'North & Central America' },
+  'caf-qualifiers-wc2030':       { competition_season_slug: 'caf-qualifiers-wc2030',       name: 'Clasificación Africana 2030',     season_label: '2026–2029',   region: 'Africa' },
+  'afc-qualifiers-wc2030':       { competition_season_slug: 'afc-qualifiers-wc2030',       name: 'Clasificación Asiática 2030',     season_label: '2027–2029',   region: 'Asia' },
+  'ofc-qualifiers-wc2030':       { competition_season_slug: 'ofc-qualifiers-wc2030',       name: 'Clasificación OFC 2030',          season_label: '2027–2029',   region: 'Oceania' },
+  'ucl-2026-2027':               { competition_season_slug: 'ucl-2026-2027',               name: 'UEFA Champions League',           season_label: '2026/2027',   region: 'Europe' },
+  'ucl-2025-2026':               { competition_season_slug: 'ucl-2025-2026',               name: 'UEFA Champions League',           season_label: '2025/2026',   region: 'Europe' },
+  'chile-primera-2026':          { competition_season_slug: 'chile-primera-2026',          name: 'Chile Primera División',          season_label: '2026',        region: 'South America' },
+  'chile-apertura-2026':         { competition_season_slug: 'chile-apertura-2026',         name: 'Torneo Apertura',                 season_label: 'Apertura 2026', region: 'South America' },
+  'chile-clausura-2026':         { competition_season_slug: 'chile-clausura-2026',         name: 'Torneo Clausura',                 season_label: 'Clausura 2026', region: 'South America' },
+  'premier-league-2026-2027':    { competition_season_slug: 'premier-league-2026-2027',    name: 'Premier League',                  season_label: '2026/2027',   region: 'Europe' },
+  'libertadores-2026':           { competition_season_slug: 'libertadores-2026',           name: 'Copa Libertadores',               season_label: '2026',        region: 'South America' },
+};
+
+async function loadCompetitionCatalog() {
+  if (_catalogCache) return _catalogCache;
+  // Use static fallback immediately; merge with API data if available
+  _catalogCache = { ...STATIC_CATALOG_FALLBACK };
+  try {
+    const data = await apiGet('competitions/catalog');
+    const apiEntries = (data?.competitions || data || []).reduce((acc, c) => {
+      acc[c.competition_season_slug] = c;
+      return acc;
+    }, {});
+    // Merge: API data wins over static fallback
+    _catalogCache = { ...STATIC_CATALOG_FALLBACK, ...apiEntries };
+  } catch {
+    // Keep static fallback — picker still works offline
+  }
+  return _catalogCache;
+}
+
+function buildLeaguePickerDropdown(catalog) {
+  const groups = COMPETITION_GROUPS
+    .map((group) => {
+      const items = group.slugs
+        .map((slug) => catalog[slug])
+        .filter(Boolean)
+        .map((comp) => {
+          const isActive = comp.competition_season_slug === SEASON;
+          const icon = COMPETITION_ICONS[comp.competition_season_slug] || group.icon;
+          return `
+            <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
+                    data-season="${escapeHtml(comp.competition_season_slug)}"
+                    role="option" aria-selected="${isActive}">
+              <span class="league-picker-item-icon">${icon}</span>
+              <span class="league-picker-item-info">
+                <span class="league-picker-item-name">${escapeHtml(comp.name)}</span>
+                <span class="league-picker-item-meta">${escapeHtml(comp.season_label)} · ${escapeHtml(comp.region || '')}</span>
+              </span>
+            </button>`;
+        });
+      if (!items.length) return '';
+      return `
+        <div class="league-picker-group">
+          <div class="league-picker-group-label">${group.icon} ${escapeHtml(group.label)}</div>
+          ${items.join('')}
+        </div>`;
+    })
+    .filter(Boolean);
+
+  // Add any catalog entry not in our group list as "Otras"
+  const knownSlugs = new Set(COMPETITION_GROUPS.flatMap((g) => g.slugs));
+  const others = Object.values(catalog)
+    .filter((c) => !knownSlugs.has(c.competition_season_slug))
+    .map((comp) => {
+      const isActive = comp.competition_season_slug === SEASON;
+      return `
+        <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
+                data-season="${escapeHtml(comp.competition_season_slug)}"
+                role="option" aria-selected="${isActive}">
+          <span class="league-picker-item-icon">🏟</span>
+          <span class="league-picker-item-info">
+            <span class="league-picker-item-name">${escapeHtml(comp.name)}</span>
+            <span class="league-picker-item-meta">${escapeHtml(comp.season_label)}</span>
+          </span>
+        </button>`;
+    });
+  if (others.length) {
+    groups.push(`<div class="league-picker-separator"></div>
+      <div class="league-picker-group">
+        <div class="league-picker-group-label">🏟 Otras</div>
+        ${others.join('')}
+      </div>`);
+  }
+
+  return groups.join('');
+}
+
+function switchSeason(slug) {
+  const url = new URL(location.href);
+  url.searchParams.set('season', slug);
+  location.href = url.toString();
+}
+
+(function initLeaguePicker() {
+  const btn = document.getElementById('league-picker-btn');
+  const dropdown = document.getElementById('league-picker-dropdown');
+  if (!btn || !dropdown) return;
+
+  let isOpen = false;
+
+  function openPicker() {
+    isOpen = true;
+    btn.setAttribute('aria-expanded', 'true');
+    dropdown.removeAttribute('hidden');
+    dropdown.innerHTML = '<div class="league-picker-group"><div class="league-picker-group-label">Cargando…</div></div>';
+    loadCompetitionCatalog().then((catalog) => {
+      dropdown.innerHTML = buildLeaguePickerDropdown(catalog);
+      dropdown.querySelectorAll('[data-season]').forEach((item) => {
+        item.addEventListener('click', () => switchSeason(item.dataset.season));
+      });
+    });
+  }
+
+  function closePicker() {
+    isOpen = false;
+    btn.setAttribute('aria-expanded', 'false');
+    dropdown.setAttribute('hidden', '');
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isOpen ? closePicker() : openPicker();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (isOpen && !dropdown.contains(e.target) && e.target !== btn) closePicker();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isOpen) closePicker();
+  });
+
+  // Update label from layout once loaded
+  const origEnsureLayout = ensureLayout;
+  // Label is updated in applyCompetitionLayout() already via .brand p
+  // We just sync it to the picker button label too
+  const labelEl = document.getElementById('league-picker-label');
+  if (labelEl) {
+    const observer = new MutationObserver(() => {
+      const name = competitionLabel();
+      if (name && name !== SEASON) labelEl.textContent = name;
+    });
+    observer.observe(document.body, { subtree: true, characterData: true, childList: true });
+  }
+})();
 
 render();

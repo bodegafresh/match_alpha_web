@@ -18,9 +18,13 @@
       <div class="brand-mark">MA</div>
       <div>
         <h1>Match Alpha</h1>
-        <p>Mundial FIFA 2026</p>
+        <button class="league-picker-btn" id="league-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+          <span id="league-picker-label">Mundial FIFA 2026</span>
+          <span class="league-picker-chevron">▾</span>
+        </button>
       </div>
     </div>
+    <div class="league-picker-dropdown" id="league-picker-dropdown" role="listbox" aria-label="Seleccionar competición" hidden></div>
     <nav class="tabs" aria-label="Secciones">
       <button class="tab active" data-view="today">Partidos</button>
       <button class="tab" data-view="standings">Posiciones</button>

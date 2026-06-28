@@ -135,6 +135,52 @@ a { color: var(--accent-2); }
   font-weight: 700; letter-spacing: .06em;
 }
 
+/* ── League picker ── */
+.league-picker-btn {
+  display: flex; align-items: center; gap: 5px;
+  margin: .12rem 0 0; padding: 0; border: none; background: none; cursor: pointer;
+  color: var(--faint); font-size: .66rem; text-transform: uppercase;
+  font-weight: 700; letter-spacing: .06em; font-family: inherit;
+  transition: color var(--t-fast);
+}
+.league-picker-btn:hover { color: var(--text); }
+.league-picker-chevron { font-size: .55rem; opacity: .7; transition: transform var(--t-fast); }
+.league-picker-btn[aria-expanded="true"] .league-picker-chevron { transform: rotate(180deg); }
+
+.league-picker-dropdown {
+  position: fixed; top: 54px; left: clamp(.75rem, 3vw, 1.5rem);
+  min-width: 240px; max-width: 320px; max-height: 70vh; overflow-y: auto;
+  background: rgb(16, 34, 58);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: var(--r-md, 14px);
+  box-shadow: var(--elev-3, 0 20px 60px rgba(0,0,0,.5));
+  z-index: 200;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  animation: fade-up 140ms var(--ease, ease) both;
+}
+.league-picker-group { padding: 6px 0; }
+.league-picker-group-label {
+  padding: 6px 14px 4px;
+  font-size: .6rem; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--faint);
+}
+.league-picker-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; width: 100%; border: none; background: none; cursor: pointer;
+  color: var(--text); font-size: .8rem; text-align: left; font-family: inherit;
+  transition: background var(--t-fast);
+}
+.league-picker-item:hover { background: var(--hover, rgba(255,255,255,.04)); }
+.league-picker-item--active { color: var(--accent); }
+.league-picker-item--active .league-picker-item-name::after {
+  content: ' ✓'; color: var(--accent); font-size: .7em;
+}
+.league-picker-item-icon { font-size: 1.1rem; flex-shrink: 0; width: 22px; text-align: center; }
+.league-picker-item-info { min-width: 0; }
+.league-picker-item-name { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.league-picker-item-meta { display: block; font-size: .68rem; color: var(--muted); margin-top: 1px; }
+.league-picker-separator { height: 1px; background: var(--line); margin: 2px 0; }
+
 /* ── Nav tabs — pill style ── */
 .tabs {
   display: flex; gap: 3px;
