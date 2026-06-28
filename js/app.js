@@ -463,13 +463,18 @@ function weatherHtml(match) {
   const weather = match.weather || match.metadata?.weather || null;
   if (!weather) return '';
   const parts = [];
-  const temp = weather.temperature_c ?? weather.temperature ?? weather.temp;
+  const temp = weather.temperature_c ?? weather.temperature ?? weather.temp_c ?? weather.temp;
   const humidity = weather.humidity_pct ?? weather.humidity;
   const wind = weather.wind_kph ?? weather.wind_speed;
+  const rain = weather.chance_of_rain;
   if (temp !== null && temp !== undefined) parts.push(`${Number(temp).toFixed(1)}°C`);
-  if (humidity !== null && humidity !== undefined) parts.push(`${Number(humidity).toFixed(0)}% hum`);
+  if (rain !== null && rain !== undefined) parts.push(`${Number(rain).toFixed(0)}% lluvia`);
+  else if (humidity !== null && humidity !== undefined) parts.push(`${Number(humidity).toFixed(0)}% hum`);
   if (wind !== null && wind !== undefined) parts.push(`${Number(wind).toFixed(0)} km/h`);
-  return parts.length ? `<div class="weather"><span>${weatherIcon(weather.condition)}</span>${escapeHtml(parts.join(' · '))}</div>` : '';
+  // Label distinguishes forecast (at kickoff) vs current conditions
+  const label = weather.forecast_type === 'kickoff_hour' ? 'Pronóstico al inicio' : '';
+  const labelHtml = label ? `<span class="weather-label">${escapeHtml(label)}</span>` : '';
+  return parts.length ? `<div class="weather">${labelHtml}<span>${weatherIcon(weather.condition)}</span>${escapeHtml(parts.join(' · '))}</div>` : '';
 }
 
 function venueDetailHtml(match) {
