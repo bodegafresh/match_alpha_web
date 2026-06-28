@@ -319,7 +319,19 @@ async function apiGet(path, params = {}, options = {}) {
   });
   const key = savedKey();
   const headers = key ? { Authorization: `Bearer ${key}` } : {};
-  const response = await fetch(url, { headers, signal: options.signal });
+  // 30-second timeout so the page doesn't freeze when Render backend is waking up
+  const REQUEST_TIMEOUT_MS = 30000;
+  const timeoutSignal = AbortSignal.timeout ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : null;
+  const signals = [timeoutSignal, options.signal].filter(Boolean);
+  const signal = signals.length > 1 && AbortSignal.any ? AbortSignal.any(signals) : (signals[0] || undefined);
+  const response = await fetch(url, { headers, signal }).catch((err) => {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      const te = new Error('El servidor tardó demasiado en responder. Puede estar despertando — intenta de nuevo en unos segundos.');
+      te.name = err.name;
+      throw te;
+    }
+    throw err;
+  });
   const json = await response.json().catch(() => ({}));
   if (response.status === 401) {
     clearKey();
