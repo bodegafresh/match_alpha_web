@@ -2130,9 +2130,16 @@ function switchSeason(slug) {
 
   let isOpen = false;
 
+  function positionPicker() {
+    const rect = btn.getBoundingClientRect();
+    dropdown.style.top = `${Math.round(rect.bottom + 8)}px`;
+    dropdown.style.left = `${Math.round(rect.left)}px`;
+  }
+
   function openPicker() {
     isOpen = true;
     btn.setAttribute('aria-expanded', 'true');
+    positionPicker();
     dropdown.removeAttribute('hidden');
     dropdown.innerHTML = '<div class="league-picker-group"><div class="league-picker-group-label">Cargando…</div></div>';
     loadCompetitionCatalog().then((catalog) => {
@@ -2152,6 +2159,10 @@ function switchSeason(slug) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     isOpen ? closePicker() : openPicker();
+  });
+
+  window.addEventListener('resize', () => {
+    if (isOpen) positionPicker();
   });
 
   document.addEventListener('click', (e) => {
