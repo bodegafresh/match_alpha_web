@@ -1426,9 +1426,9 @@ const FEATURE_HEALTH = [
   { key: 'form',      label: 'Forma reciente',       status: 'ok' },
   { key: 'odds',      label: 'Odds / Mercado',       status: 'ok' },
   { key: 'lineups',   label: 'Lineups confirmados',  status: 'pending' },
-  { key: 'weather',   label: 'Clima / Condiciones',  status: 'pending' },
+  { key: 'weather',   label: 'Clima / Condiciones',  status: 'ok' },
   { key: 'xg',        label: 'xG histórico',         status: 'pending' },
-  { key: 'news',      label: 'Noticias / Lesiones',  status: 'na' },
+  { key: 'news',      label: 'Noticias / Lesiones',  status: 'ok' },
 ];
 
 function featureHealthGrid() {
