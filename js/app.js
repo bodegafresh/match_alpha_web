@@ -307,7 +307,18 @@ function tournamentViewDefinitions() {
 }
 
 function applyCompetitionLayout() {
-  const navByView = Object.fromEntries(navigationItems().map((item) => [layoutKeyToView(item.key), item]));
+  const navByView = {};
+  for (const item of navigationItems()) {
+    const view = layoutKeyToView(item.key);
+    // Keep first item by order to avoid legacy aliases (e.g. bracket) overriding tournament labels.
+    if (!navByView[view]) navByView[view] = item;
+  }
+  for (const fallback of fallbackLayout().ui.navigation) {
+    const view = layoutKeyToView(fallback.key);
+    if (!navByView[view] && ['ev', 'model', 'stats', 'news'].includes(view)) {
+      navByView[view] = fallback;
+    }
+  }
   document.querySelectorAll('.tab').forEach((button) => {
     const item = navByView[button.dataset.view];
     button.hidden = !item;
