@@ -461,6 +461,31 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .standings-row--2nd { border-left: 3px solid rgba(245, 200, 66, .45); }
 .standings-row--3rd { border-left: 3px solid rgba(245, 200, 66, .22); }
 
+.standings-global-cards { display: none; }
+
+.teams-filter-card { padding: .8rem; }
+.teams-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.8fr) repeat(5, minmax(120px, 1fr));
+  gap: .55rem;
+}
+.teams-filter-grid input,
+.teams-filter-grid select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: .5rem .65rem;
+}
+
+.standings-global-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
 .pts-cell { font-size: 1rem; font-weight: 800; }
 
 .group-block { display: grid; gap: .9rem; }
@@ -1334,6 +1359,9 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .knockout-tabs { display: none; }
   .toolbar { position: static; background: none; backdrop-filter: none; margin-inline: 0; padding: 0; }
   #date-filter-bar { margin-bottom: .5rem; }
+  .teams-filter-grid { grid-template-columns: 1fr 1fr; }
+  .standings-global-table-wrap { display: none; }
+  .standings-global-cards { display: grid; gap: .6rem; }
 }
 
 @media (max-width: 680px) {

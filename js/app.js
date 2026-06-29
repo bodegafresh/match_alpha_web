@@ -17,6 +17,16 @@ const state = {
   renderSeq: 0,
   activeController: null,
   knockoutStage: null,
+  tournamentView: null,
+  eloRatingType: 'INTERNATIONAL',
+  teamsFilters: {
+    search: '',
+    sort: 'name',
+    group: '',
+    status: '',
+    country: '',
+    continent: '',
+  },
 };
 
 const dateModes = [
@@ -198,8 +208,14 @@ function layoutKeyToView(key) {
     matches: 'today',
     standings: 'standings',
     teams: 'teams',
-    bracket: 'knockout',
-    knockout: 'knockout',
+    tournament: 'tournament',
+    bracket: 'tournament',
+    knockout: 'tournament',
+    elo: 'elo',
+    news: 'news',
+    ev: 'ev',
+    model: 'model',
+    stats: 'stats',
   }[key] || key;
 }
 
@@ -211,6 +227,8 @@ function fallbackLayout() {
       has_knockout: true,
       has_standings: true,
       has_teams: true,
+      has_tournament: true,
+      has_elo: true,
     },
     ui: {
       default_view: 'matches',
@@ -218,9 +236,19 @@ function fallbackLayout() {
         { key: 'matches', label: 'Partidos', enabled: true, order: 10 },
         { key: 'standings', label: 'Posiciones', enabled: true, order: 20 },
         { key: 'teams', label: 'Equipos', enabled: true, order: 30 },
-        { key: 'bracket', label: 'Eliminatorias', enabled: true, order: 40 },
+        { key: 'tournament', label: 'Torneo', enabled: true, order: 40 },
+        { key: 'news', label: 'Noticias', enabled: true, order: 50 },
+        { key: 'elo', label: 'ELO', enabled: true, order: 60 },
+        { key: 'ev', label: 'EV+', enabled: true, order: 70 },
+        { key: 'model', label: 'Modelo', enabled: true, order: 80 },
+        { key: 'stats', label: 'Stats', enabled: true, order: 90 },
       ],
     },
+    tournament_views: [
+      { key: 'groups', label: 'Grupos', render_mode: 'GROUP_TABLES', enabled: true, order: 10 },
+      { key: 'knockout', label: 'Eliminatoria', render_mode: 'BRACKET', enabled: true, order: 20 },
+      { key: 'qualified', label: 'Clasificados', render_mode: 'QUALIFICATION_SUMMARY', enabled: true, order: 30 },
+    ],
     stages: _FALLBACK_KNOCKOUT_STAGES.map((stage, index) => ({
       stage_code: stage.key,
       stage_label: stage.title,
@@ -270,18 +298,22 @@ function stageDefinitionsByViewType(viewType) {
     .filter((s) => s.key);
 }
 
+function tournamentViewDefinitions() {
+  const fromLayout = (state.layout?.tournament_views || [])
+    .filter((item) => item && item.enabled !== false)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (fromLayout.length) return fromLayout;
+  return fallbackLayout().tournament_views || [];
+}
+
 function applyCompetitionLayout() {
   const navByView = Object.fromEntries(navigationItems().map((item) => [layoutKeyToView(item.key), item]));
-  const ALWAYS_VISIBLE = new Set(['ev', 'model', 'stats', 'news']);
   document.querySelectorAll('.tab').forEach((button) => {
-    if (button.classList.contains('tab--quant')) return; // quant tabs always visible
-    if (ALWAYS_VISIBLE.has(button.dataset.view)) return;  // extra always-visible tabs
     const item = navByView[button.dataset.view];
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
   });
-  const QUANT_VIEWS = new Set(['ev', 'model', 'stats']);
-  if (!navByView[state.view] && !QUANT_VIEWS.has(state.view) && state.view !== 'news') {
+  if (!navByView[state.view]) {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
@@ -782,75 +814,181 @@ async function renderMatchListView(stageCode, stageTitle, options = {}) {
     </section>`).join('');
 }
 
+function qualificationStatusLabel(value) {
+  const status = String(value || 'PENDING').toUpperCase();
+  return {
+    QUALIFIED_GROUP_WINNER: 'Clasificado',
+    QUALIFIED_GROUP_RUNNER_UP: 'Clasificado',
+    QUALIFIED_BEST_THIRD: 'Clasificado',
+    THIRD_PLACE_CANDIDATE: 'Pendiente',
+    PENDING_TIEBREAKER: 'Pendiente',
+    PENDING: 'Pendiente',
+    ELIMINATED: 'Eliminado',
+  }[status] || status;
+}
+
+function standingsGlobalHtml(rows) {
+  const tableRows = rows.map((row) => `
+    <tr>
+      <td><strong>${row.global_position ?? '-'}</strong></td>
+      <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name || '-')}</strong></td>
+      <td>${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</td>
+      <td><strong>${row.points ?? 0}</strong></td>
+      <td>${row.played ?? 0}</td>
+      <td>${row.wins ?? 0}</td>
+      <td>${row.draws ?? 0}</td>
+      <td>${row.losses ?? 0}</td>
+      <td>${row.goals_for ?? 0}</td>
+      <td>${row.goals_against ?? 0}</td>
+      <td>${row.goal_difference ?? 0}</td>
+      <td><span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(row.status))}</span></td>
+    </tr>`).join('');
+
+  const cards = rows.map((row) => `
+    <article class="card standings-global-card fade-in">
+      <header>
+        <strong>#${row.global_position ?? '-'}</strong>
+        <span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(row.status))}</span>
+      </header>
+      <div class="team-head" style="margin:.35rem 0 .25rem">
+        <div class="flag">${teamFlag(row)}</div>
+        <div>
+          <h3 style="margin:0;font-size:.95rem">${escapeHtml(row.team_name || '-')}</h3>
+          <p style="margin:0;color:var(--muted);font-size:.72rem">${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</p>
+        </div>
+      </div>
+      <div class="stats-line">
+        <div class="stat"><b>${row.points ?? 0}</b><span>PTS</span></div>
+        <div class="stat"><b>${row.played ?? 0}</b><span>J</span></div>
+        <div class="stat"><b>${row.goals_for ?? 0}</b><span>GF</span></div>
+        <div class="stat"><b>${row.goal_difference ?? 0}</b><span>DG</span></div>
+      </div>
+    </article>`).join('');
+
+  return `
+    <section class="view-section fade-in">
+      <div class="card table-card standings-global-table-wrap">
+        <table class="standings-global-table">
+          <thead><tr><th>#</th><th>Equipo</th><th>Grupo/Stage</th><th>PTS</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th><th>Estado</th></tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      <div class="standings-global-cards">${cards}</div>
+    </section>`;
+}
+
 async function renderStandings(options = {}) {
   if (!options.silent) loading('Posiciones');
-  await ensureLayout();
-  const data = await cached('web/standings', {}, 90000, options);
-  const groups = data.groups || [];
+  const data = await cached(`competitions/${SEASON}/standings/global`, {}, 90000, options);
+  const rows = data.teams || [];
+  setStatus('Posiciones', `${rows.length} equipos`);
+  root.innerHTML = rows.length ? standingsGlobalHtml(rows) : emptyState('No hay posiciones globales disponibles.');
+}
 
-  // Determine which renderer to use from layout stages
-  const leagueStages   = stageDefinitionsByViewType('LEAGUE_TABLE');
-  const groupStages    = stageDefinitionsByViewType('GROUP_TABLES');
-  const hasLeagueStage = leagueStages.length > 0;
-  const hasGroupStage  = groupStages.length > 0;
+function teamCatalogCard(team) {
+  return `
+    <article class="card team-card clickable-card fade-in" data-team-slug="${escapeHtml(team.slug || team.team_slug)}" tabindex="0">
+      <div class="team-card-top">
+        <div class="team-head">
+          <div class="flag">${teamFlag(team)}</div>
+          <div>
+            <h3>${escapeHtml(team.display_name || team.team_name)}</h3>
+            <p>${escapeHtml(groupLabel(team.group_name || team.group_code || team.stage_name || ''))}</p>
+          </div>
+        </div>
+        <strong class="points-pill">#${team.global_position || '-'} · ${team.points ?? 0} pts</strong>
+      </div>
+      <div class="team-rating">ELO <b>${team.elo_rating != null ? Number(team.elo_rating).toFixed(0) : '-'}</b></div>
+      <div class="stats-line">
+        <div class="stat"><b>${team.played ?? 0}</b><span>J</span></div>
+        <div class="stat"><b>${team.goals_for ?? 0}</b><span>GF</span></div>
+        <div class="stat"><b>${team.goal_difference ?? 0}</b><span>DG</span></div>
+        <div class="stat"><b>${team.roster_count ?? 0}</b><span>Plantel</span></div>
+      </div>
+      <div style="margin-top:.55rem;display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+        <span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(team.status))}</span>
+        <small style="color:var(--muted)">${escapeHtml(team.country_code || '')}</small>
+      </div>
+    </article>`;
+}
 
-  // Fallback: capabilities flags if no explicit stage view_type
-  const isLeagueByCapability = state.layout?.capabilities?.has_league_table && !state.layout?.capabilities?.has_groups;
-  const useLeague = hasLeagueStage || (!hasGroupStage && isLeagueByCapability);
-
-  if (useLeague) {
-    const stageRules = state.layout?.stages?.find(
-      (s) => String(s.view_type || '').toUpperCase() === 'LEAGUE_TABLE'
-    )?.rules || {};
-    const totalTeams = groups.flatMap((g) => g.standings || []).length;
-    setStatus('Posiciones', `${totalTeams} equipos`);
-    root.innerHTML = renderLeagueTableView(groups, stageRules) || emptyState('No hay posiciones disponibles.');
-  } else {
-    setStatus('Posiciones', `${groups.length} grupos`);
-    root.innerHTML = renderGroupTablesView(groups) || emptyState('No hay posiciones disponibles.');
-  }
+function teamsFilterControls(data) {
+  const af = data.available_filters || {};
+  const makeOptions = (items, current, label) => {
+    const opts = [`<option value="">${label}</option>`]
+      .concat((items || []).map((item) => `<option value="${escapeHtml(item)}" ${item === current ? 'selected' : ''}>${escapeHtml(item)}</option>`));
+    return opts.join('');
+  };
+  return `
+    <section class="view-section fade-in">
+      <div class="card teams-filter-card">
+        <div class="teams-filter-grid">
+          <input id="teams-search" type="search" placeholder="Buscar equipo" value="${escapeHtml(state.teamsFilters.search)}">
+          <select id="teams-sort">
+            <option value="name" ${state.teamsFilters.sort === 'name' ? 'selected' : ''}>A-Z</option>
+            <option value="position" ${state.teamsFilters.sort === 'position' ? 'selected' : ''}>Posición</option>
+            <option value="points" ${state.teamsFilters.sort === 'points' ? 'selected' : ''}>Puntos</option>
+            <option value="elo" ${state.teamsFilters.sort === 'elo' ? 'selected' : ''}>ELO</option>
+          </select>
+          <select id="teams-group">${makeOptions(af.groups, state.teamsFilters.group, 'Grupo/Stage')}</select>
+          <select id="teams-status">${makeOptions(af.statuses, state.teamsFilters.status, 'Estado')}</select>
+          <select id="teams-country">${makeOptions(af.countries, state.teamsFilters.country, 'País')}</select>
+          <select id="teams-continent">${makeOptions(af.continents, state.teamsFilters.continent, 'Continente')}</select>
+        </div>
+      </div>
+    </section>`;
 }
 
 async function renderTeams(options = {}) {
   if (!options.silent) loading('Equipos');
-  const data = await cached('web/teams', {}, 90000, options);
+  const params = {
+    search: state.teamsFilters.search || undefined,
+    sort: state.teamsFilters.sort || 'name',
+    group: state.teamsFilters.group || undefined,
+    status: state.teamsFilters.status || undefined,
+    country: state.teamsFilters.country || undefined,
+    continent: state.teamsFilters.continent || undefined,
+  };
+  const data = await cached(`competitions/${SEASON}/teams`, params, 90000, options);
   const teams = data.teams || [];
-  setStatus('Equipos', `${teams.length} selecciones`);
-  const byGroup = teams.reduce((acc, team) => {
-    const key = groupLabel(team.group_name || team.group_code || 'Sin grupo');
-    (acc[key] ||= []).push(team);
-    return acc;
-  }, {});
-  root.innerHTML = Object.keys(byGroup).map((groupName) => `
+  setStatus('Equipos', `${teams.length} equipos`);
+
+  root.innerHTML = `
+    ${teamsFilterControls(data)}
     <section class="view-section">
-      <h2 class="section-title">${escapeHtml(groupName)}</h2>
-      <div class="grid team-grid">${byGroup[groupName].map(teamCard).join('')}</div>
-    </section>`).join('') || emptyState('No hay equipos disponibles.');
+      <div class="grid team-grid">${teams.map(teamCatalogCard).join('')}</div>
+    </section>
+  `;
+  if (!teams.length) {
+    root.innerHTML += emptyState('No hay equipos para los filtros aplicados.');
+  }
+
+  const rerenderWithFilters = () => {
+    state.teamsFilters.search = (document.getElementById('teams-search')?.value || '').trim();
+    state.teamsFilters.sort = document.getElementById('teams-sort')?.value || 'name';
+    state.teamsFilters.group = document.getElementById('teams-group')?.value || '';
+    state.teamsFilters.status = document.getElementById('teams-status')?.value || '';
+    state.teamsFilters.country = document.getElementById('teams-country')?.value || '';
+    state.teamsFilters.continent = document.getElementById('teams-continent')?.value || '';
+    renderTeams({ localOnly: true });
+  };
+
+  const searchInput = document.getElementById('teams-search');
+  if (searchInput) {
+    let searchTimer = null;
+    searchInput.addEventListener('input', () => {
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(rerenderWithFilters, 220);
+    });
+  }
+  ['teams-sort', 'teams-group', 'teams-status', 'teams-country', 'teams-continent'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', rerenderWithFilters);
+  });
+
   root.querySelectorAll('[data-team-slug]').forEach((card) => {
     card.addEventListener('click', () => openTeamModal(card.dataset.teamSlug));
   });
-}
-
-function teamCard(team) {
-  const recent = Array.isArray(team.recent_form) ? team.recent_form : [];
-  return `
-    <article class="card team-card clickable-card fade-in" data-team-slug="${escapeHtml(team.slug)}" tabindex="0">
-      <div class="team-card-top">
-        <div class="team-head">
-          <div class="flag">${teamFlag(team)}</div>
-          <div><h3>${escapeHtml(team.display_name)}</h3><p>${escapeHtml(groupLabel(team.group_name || team.group_code) || team.country_code || '')}</p></div>
-        </div>
-        <strong class="points-pill">#${team.position || '-'} · ${team.points ?? 0} pts</strong>
-      </div>
-      <div class="team-rating">Rating <b>${team.seed_rating ?? team.elo_or_seed_rating ?? '-'}</b></div>
-      <div class="form-dots">${recent.slice(0, 6).map((item) => `<span class="form-${String(item).toLowerCase()}">${escapeHtml(item)}</span>`).join('') || '<span>-</span>'}</div>
-      <div class="stats-line">
-        <div class="stat"><b>${team.played ?? 0}</b><span>J</span></div>
-        <div class="stat"><b>${team.goal_difference ?? 0}</b><span>DG</span></div>
-        <div class="stat"><b>${team.goals_for ?? 0}</b><span>GF</span></div>
-        <div class="stat"><b>${team.roster_count ?? 0}</b><span>Plantel</span></div>
-      </div>
-    </article>`;
 }
 
 async function openTeamModal(teamSlug) {
@@ -1161,6 +1299,202 @@ function placeholderKnockoutCard(stage, index) {
       <div class="bracket-team"><span class="placeholder-icon">◇</span> <strong>${escapeHtml(labels[1])}</strong></div>
       <div class="venue compact">📍 Sede por confirmar</div>
     </article>`;
+}
+
+function tournamentTabsHtml(activeKey, views) {
+  return `
+    <div class="knockout-tabs" role="tablist" aria-label="Secciones de torneo">
+      ${views.map((view) => `
+        <button class="${view.key === activeKey ? 'active' : ''}" data-tournament-view="${escapeHtml(view.key)}" type="button" role="tab" aria-selected="${view.key === activeKey ? 'true' : 'false'}">
+          ${escapeHtml(view.label)}
+        </button>`).join('')}
+    </div>`;
+}
+
+function qualificationSummaryHtml(data) {
+  const groups = data.groups || [];
+  const bestThirds = data.best_thirds || [];
+  const slots = data.tournament_slots || [];
+  const byStatus = (status) => bestThirds.filter((item) => String(item.qualification_status || '').toUpperCase() === status);
+
+  const winnerRows = groups.flatMap((g) => (g.teams || []).filter((t) => t.position === 1));
+  const runnerRows = groups.flatMap((g) => (g.teams || []).filter((t) => t.position === 2));
+  const bestQualified = byStatus('QUALIFIED_BEST_THIRD');
+  const bestPending = byStatus('THIRD_PLACE_CANDIDATE').concat(byStatus('PENDING_TIEBREAKER'));
+  const eliminated = groups.flatMap((g) => (g.teams || []).filter((t) => String(t.qualification_status || '').toUpperCase() === 'ELIMINATED'));
+  const pendingSlots = slots.filter((s) => !s.resolved);
+
+  const teamList = (rows) => rows.length
+    ? `<ul>${rows.map((row) => `<li>${escapeHtml(row.team_name || '-')} <small>${escapeHtml(row.group_code || '')}</small></li>`).join('')}</ul>`
+    : '<p class="news-empty">Sin datos.</p>';
+
+  return `
+    <section class="view-section fade-in">
+      <div class="grid">
+        <article class="card">
+          <h3 class="section-title">Primeros de grupo</h3>
+          ${teamList(winnerRows)}
+        </article>
+        <article class="card">
+          <h3 class="section-title">Segundos de grupo</h3>
+          ${teamList(runnerRows)}
+        </article>
+        <article class="card">
+          <h3 class="section-title">Mejores terceros</h3>
+          ${teamList(bestQualified)}
+        </article>
+        <article class="card">
+          <h3 class="section-title">Terceros pendientes</h3>
+          ${teamList(bestPending)}
+        </article>
+        <article class="card">
+          <h3 class="section-title">Eliminados</h3>
+          ${teamList(eliminated)}
+        </article>
+        <article class="card">
+          <h3 class="section-title">Slots pendientes</h3>
+          ${pendingSlots.length ? `<ul>${pendingSlots.map((slot) => `<li>${escapeHtml(slot.slot_label || slot.slot_code || '')}</li>`).join('')}</ul>` : '<p class="news-empty">Sin slots pendientes.</p>'}
+        </article>
+      </div>
+    </section>`;
+}
+
+async function renderTournament(options = {}) {
+  if (!options.silent) loading('Torneo');
+  await ensureLayout();
+
+  const views = tournamentViewDefinitions();
+  if (!views.length) {
+    setStatus('Torneo', 'Sin secciones');
+    root.innerHTML = emptyState('Esta competencia no define vista de torneo.');
+    return;
+  }
+
+  if (!state.tournamentView || !views.some((view) => view.key === state.tournamentView)) {
+    state.tournamentView = views[0].key;
+  }
+
+  const selected = views.find((view) => view.key === state.tournamentView) || views[0];
+  let bodyHtml = '';
+
+  if (selected.key === 'groups' || selected.render_mode === 'GROUP_TABLES') {
+    const data = await cached('web/standings', {}, 90000, options);
+    const groups = data.groups || [];
+    setStatus('Torneo', `${groups.length} grupos`);
+    bodyHtml = renderGroupTablesView(groups) || emptyState('No hay grupos disponibles.');
+  } else if (selected.key === 'knockout' || selected.render_mode === 'BRACKET') {
+    await renderKnockout({ ...options, silent: true });
+    setStatus('Torneo', 'Eliminatoria');
+    bodyHtml = root.innerHTML;
+  } else if (selected.key === 'qualified' || selected.render_mode === 'QUALIFICATION_SUMMARY') {
+    const data = await cached(`competitions/${SEASON}/qualification-picture`, {}, 90000, options);
+    setStatus('Torneo', 'Clasificados');
+    bodyHtml = qualificationSummaryHtml(data);
+  } else if (selected.render_mode === 'LEAGUE_TABLE') {
+    const data = await cached('web/standings', {}, 90000, options);
+    const groups = data.groups || [];
+    const stageRules = state.layout?.stages?.find((s) => String(s.view_type || '').toUpperCase() === 'LEAGUE_TABLE')?.rules || {};
+    bodyHtml = renderLeagueTableView(groups, stageRules);
+    setStatus('Torneo', selected.label || 'Tabla');
+  } else {
+    bodyHtml = emptyState(`Vista no soportada: ${selected.render_mode || selected.key}`);
+    setStatus('Torneo', selected.label || 'Torneo');
+  }
+
+  root.innerHTML = `
+    <div class="fade-in">
+      ${tournamentTabsHtml(selected.key, views)}
+      ${bodyHtml}
+    </div>`;
+
+  root.querySelectorAll('[data-tournament-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const nextView = button.dataset.tournamentView;
+      if (!nextView || nextView === state.tournamentView) return;
+      state.tournamentView = nextView;
+      renderTournament({ localOnly: true });
+    });
+  });
+
+  if (selected.key === 'knockout' || selected.render_mode === 'BRACKET') {
+    root.querySelectorAll('[data-knockout-stage]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (button.dataset.knockoutStage === state.knockoutStage) return;
+        state.knockoutStage = button.dataset.knockoutStage;
+        renderTournament({ localOnly: true });
+      });
+    });
+    root.querySelectorAll('[data-dir]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nextStage = adjacentKnockoutStage(Number(btn.dataset.dir));
+        if (!nextStage) return;
+        state.knockoutStage = nextStage;
+        renderTournament({ localOnly: true });
+      });
+    });
+    const view = root.querySelector('.knockout-view');
+    if (view) attachKnockoutSwipe(view);
+  }
+}
+
+function eloBadge(rank) {
+  if (rank === 1) return '<span class="chip chip--ok">#1</span>';
+  if (rank <= 4) return '<span class="chip chip--warn">Top 4</span>';
+  if (rank <= 8) return '<span class="chip chip--muted">Top 8</span>';
+  return '<span class="chip chip--muted">Resto</span>';
+}
+
+function eloTableHtml(data) {
+  const teams = data.teams || [];
+  const maxRating = Math.max(...teams.map((t) => Number(t.rating || 0)), 1);
+  return `
+    <section class="view-section fade-in">
+      <div class="card teams-filter-card" style="margin-bottom:.75rem">
+        <div class="teams-filter-grid" style="grid-template-columns:minmax(180px, 260px)">
+          <select id="elo-rating-type">
+            ${(data.rating_types || []).map((value) => `<option value="${escapeHtml(value)}" ${value === data.rating_type ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="card table-card">
+        <table>
+          <thead><tr><th>#</th><th>Equipo</th><th>Rating</th><th>Delta</th><th>Barra</th><th>Badge</th></tr></thead>
+          <tbody>
+            ${teams.map((team) => {
+              const rating = Number(team.rating || 0);
+              const prev = team.previous_rating != null ? Number(team.previous_rating) : null;
+              const delta = team.delta != null ? Number(team.delta) : (prev != null ? rating - prev : null);
+              const width = Math.max(2, Math.round((rating / maxRating) * 100));
+              return `<tr>
+                <td><strong>${team.rank || '-'}</strong></td>
+                <td><strong>${escapeHtml(team.flag || '')} ${escapeHtml(team.team_name || '-')}</strong></td>
+                <td>${team.rating != null ? rating.toFixed(0) : '-'}</td>
+                <td>${delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}` : '-'}</td>
+                <td><div class="prob-bar-track"><div class="prob-bar-fill prob-bar-fill--model" style="width:${width}%"></div></div></td>
+                <td>${eloBadge(team.rank || 999)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
+async function renderElo(options = {}) {
+  if (!options.silent) loading('ELO');
+  const params = state.eloRatingType ? { rating_type: state.eloRatingType } : {};
+  const data = await cached(`competitions/${SEASON}/elo`, params, 90000, options);
+  const teams = data.teams || [];
+  setStatus('ELO', `${teams.length} equipos · ${data.rating_type || ''}`.trim());
+  root.innerHTML = teams.length ? eloTableHtml(data) : emptyState('No hay ratings ELO disponibles para esta season.');
+
+  const select = document.getElementById('elo-rating-type');
+  if (select) {
+    select.addEventListener('change', () => {
+      state.eloRatingType = select.value;
+      renderElo({ localOnly: true });
+    });
+  }
 }
 
 // ─── Quant adapters ────────────────────────────────────────────────────────
@@ -1968,7 +2302,8 @@ async function render(options = {}) {
     updateTabs();
     if (state.view === 'standings') { hideDateFilterBar(); await renderStandings(renderOptions); }
     else if (state.view === 'teams') { hideDateFilterBar(); await renderTeams(renderOptions); }
-    else if (state.view === 'knockout') { hideDateFilterBar(); await renderKnockout(renderOptions); }
+    else if (state.view === 'tournament' || state.view === 'knockout') { hideDateFilterBar(); await renderTournament(renderOptions); }
+    else if (state.view === 'elo') { hideDateFilterBar(); await renderElo(renderOptions); }
     else if (state.view === 'ev') { hideDateFilterBar(); await renderEV(renderOptions); }
     else if (state.view === 'model') { hideDateFilterBar(); await renderModel(renderOptions); }
     else if (state.view === 'stats') { hideDateFilterBar(); await renderStats(renderOptions); }
@@ -2000,7 +2335,12 @@ function refreshSilently() {
   if (document.hidden) return;
   if (!state.layout) return;
   const quantPaths = { ev: 'ev/opportunities', model: 'model/diagnostics', stats: 'calibration/summary' };
-  const path = quantPaths[state.view] || (state.view === 'standings' ? 'web/standings' : state.view === 'teams' ? 'web/teams' : state.view === 'knockout' ? 'web/knockout' : 'web/matches-overview');
+  const path = quantPaths[state.view]
+    || (state.view === 'standings' ? `competitions/${SEASON}/standings/global`
+    : state.view === 'teams' ? `competitions/${SEASON}/teams`
+    : state.view === 'tournament' || state.view === 'knockout' ? 'web/knockout'
+    : state.view === 'elo' ? `competitions/${SEASON}/elo`
+    : 'web/matches-overview');
   invalidateViewCache(path);
   render({ silent: true });
 }
