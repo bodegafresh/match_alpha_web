@@ -1,0 +1,20 @@
+js/app.js
+  s_470526d6dc3738::t_2d1b262b0119c2 7-8,319-320
+  s_470526d6dc3738::t_9836419a8c754f 1169-1180,1201-1204,1293-1309,1368-1371,1384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "734871c75378b48e3e463b900ba4277c2fc34ef2",
+  "prompts": {},
+  "sessions": {
+    "s_470526d6dc3738": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "527f0604-de42-4674-8592-6b91fd97cdfc",
+        "model": "gpt-5.3-codex"
+      },
+      "human_author": "Marco Cerda <marco.cerda@mercadolibre.cl>"
+    }
+  }
+}
