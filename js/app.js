@@ -4,6 +4,8 @@ const SEASON = new URLSearchParams(location.search).get('season') || CFG.DEFAULT
 const KEY_STORAGE = CFG.KEY_STORAGE || 'match_alpha_web_key';
 const AUTO_REFRESH_MS = Number(CFG.AUTO_REFRESH_MS || 30000);
 const CHILE_TIMEZONE = 'America/Santiago';
+const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || CHILE_TIMEZONE;
+const BROWSER_LANG = (navigator.language || 'en').toLowerCase().split('-')[0];
 
 const state = {
   view: 'today',
@@ -314,6 +316,8 @@ async function apiGet(path, params = {}, options = {}) {
   if (!API_BASE_URL || API_BASE_URL.includes('tu-worker')) throw new Error('Configura API_BASE_URL en js/config.js');
   const url = new URL(`${API_BASE_URL}/${path.replace(/^\/+/, '')}`);
   url.searchParams.set('season', SEASON);
+  url.searchParams.set('timezone', BROWSER_TIMEZONE);
+  url.searchParams.set('lang', BROWSER_LANG || 'en');
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
   });
@@ -1162,6 +1166,18 @@ function placeholderKnockoutCard(stage, index) {
 // ─── Quant adapters ────────────────────────────────────────────────────────
 
 function adaptEVOpportunity(raw) {
+  let explanation = raw.explanation;
+  if (typeof explanation === 'string') {
+    try {
+      explanation = JSON.parse(explanation);
+    } catch (_err) {
+      explanation = null;
+    }
+  }
+  const lambda = explanation?.lambda_components || null;
+  const homeLambda = lambda?.home_lambda != null ? Number(lambda.home_lambda) : null;
+  const awayLambda = lambda?.away_lambda != null ? Number(lambda.away_lambda) : null;
+
   return {
     id: raw.betting_decision_id,
     matchLabel: [raw.home_flag_emoji, raw.home_team_name, 'vs', raw.away_flag_emoji, raw.away_team_name || raw.away_slot_label || '???'].filter(Boolean).join(' ') || raw.match_id,
@@ -1182,6 +1198,10 @@ function adaptEVOpportunity(raw) {
     modelName: raw.model_name,
     modelFamily: raw.model_family,
     oddsAgeMinutes: raw.odds_age_minutes,
+    homeLambda,
+    awayLambda,
+    over25Prob: probOver25(homeLambda, awayLambda),
+    bttsYesProb: probBttsYes(homeLambda, awayLambda),
   };
 }
 
@@ -1270,6 +1290,23 @@ function fmtNum(value, decimals = 2) {
   return Number(value).toFixed(decimals);
 }
 
+function probOver25(homeLambda, awayLambda) {
+  if (homeLambda == null || awayLambda == null) return null;
+  const lambdaTot = homeLambda + awayLambda;
+  const pLe2 = Math.exp(-lambdaTot) * (1 + lambdaTot + (lambdaTot * lambdaTot) / 2);
+  const pOver = 1 - pLe2;
+  return Math.max(0, Math.min(1, pOver));
+}
+
+function probBttsYes(homeLambda, awayLambda) {
+  if (homeLambda == null || awayLambda == null) return null;
+  const pHome0 = Math.exp(-homeLambda);
+  const pAway0 = Math.exp(-awayLambda);
+  const pBoth0 = Math.exp(-(homeLambda + awayLambda));
+  const pYes = 1 - pHome0 - pAway0 + pBoth0;
+  return Math.max(0, Math.min(1, pYes));
+}
+
 function evHeroCard(opp) {
   if (!opp) return '';
   const evHeat = opp.ev > 0.10 ? 'ev-value--hot' : opp.ev > 0.05 ? 'ev-value--warm' : 'ev-value--cold';
@@ -1328,6 +1365,10 @@ function evOpportunityRow(opp) {
   const confLevel = confPct != null ? (confPct >= 65 ? 'high' : confPct >= 35 ? 'medium' : 'low') : 'low';
 
   const kickoff = opp.kickoffAt ? chileDateTimeLabel(opp.kickoffAt) : '';
+  const hasLambdaBlock = opp.homeLambda != null && opp.awayLambda != null;
+  const lambdaBlock = hasLambdaBlock
+    ? `λ: ${fmtNum(opp.homeLambda)}-${fmtNum(opp.awayLambda)} · Over 2.5: ${fmtPct(opp.over25Prob)} · BTTS: ${fmtPct(opp.bttsYesProb)}`
+    : '';
   const fairArrow = opp.fairOdds && opp.decimalOdds
     ? `${fmtNum(opp.fairOdds)} → <b>${fmtNum(opp.decimalOdds)}</b>`
     : opp.fairOdds ? fmtNum(opp.fairOdds) : '—';
@@ -1340,6 +1381,7 @@ function evOpportunityRow(opp) {
       <td class="ev-td-match">
         <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
         <div class="ev-match-date">${escapeHtml(kickoff)}</div>
+        ${lambdaBlock ? `<div class="ev-match-insights">${escapeHtml(lambdaBlock)}</div>` : ''}
       </td>
       <td class="ev-td-market">${escapeHtml(opp.marketCode || '—')}</td>
       <td class="ev-td-sel"><b>${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</b></td>
