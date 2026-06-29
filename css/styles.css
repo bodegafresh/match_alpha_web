@@ -1129,6 +1129,12 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .ev-market-prob { color: var(--muted); }
 .ev-match-label { font-size: .8rem; font-weight: 700; color: var(--text); }
 .ev-match-date  { font-size: .68rem; color: var(--muted); margin-top: .05rem; }
+.ev-match-insights {
+  margin-top: .26rem;
+  font-size: .64rem;
+  color: var(--faint);
+  line-height: 1.35;
+}
 .ev-overlay { font-size: .68rem; }
 .ev-kelly-label { font-size: .6rem; font-weight: 700; letter-spacing: .04em; color: var(--muted); }
 
