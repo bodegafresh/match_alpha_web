@@ -301,6 +301,7 @@ a { color: var(--accent-2); }
 
 /* Section titles */
 .view-section { display: grid; gap: .9rem; }
+.tournament-body { display: grid; gap: .9rem; }
 .section-title {
   display: flex; align-items: center; gap: .75rem;
   margin: 0;
@@ -1358,6 +1359,9 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .ev-summary-bar { grid-template-columns: repeat(3, 1fr); }
   .knockout-tabs { display: none; }
   .tournament-tabs.knockout-tabs { display: flex; }
+  .tournament-view .tournament-body { padding-top: .45rem; }
+  .tournament-view .tournament-tabs + .tournament-body .group-block:first-child,
+  .tournament-view .tournament-tabs + .tournament-body .view-section:first-child { margin-top: .15rem; }
   .toolbar { position: static; background: none; backdrop-filter: none; margin-inline: 0; padding: 0; }
   #date-filter-bar { margin-bottom: .5rem; }
   .teams-filter-grid { grid-template-columns: 1fr 1fr; }

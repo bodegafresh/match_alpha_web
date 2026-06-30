@@ -1438,9 +1438,9 @@ async function renderTournament(options = {}) {
   }
 
   root.innerHTML = `
-    <div class="fade-in">
+    <div class="fade-in tournament-view tournament-view--${escapeHtml(selected.key)}">
       ${tournamentTabsHtml(selected.key, views)}
-      ${bodyHtml}
+      <div class="tournament-body">${bodyHtml}</div>
     </div>`;
 
   root.querySelectorAll('[data-tournament-view]').forEach((button) => {
