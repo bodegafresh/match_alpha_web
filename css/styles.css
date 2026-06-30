@@ -1357,6 +1357,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .status-strip { font-size: .78rem; }
   .ev-summary-bar { grid-template-columns: repeat(3, 1fr); }
   .knockout-tabs { display: none; }
+  .tournament-tabs.knockout-tabs { display: flex; }
   .toolbar { position: static; background: none; backdrop-filter: none; margin-inline: 0; padding: 0; }
   #date-filter-bar { margin-bottom: .5rem; }
   .teams-filter-grid { grid-template-columns: 1fr 1fr; }
@@ -1517,6 +1518,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .knockout-view { display: block !important; }
   .knockout-mobile-view { display: block !important; page-break-inside: avoid; }
   .knockout-nav-btn, .knockout-progress, .knockout-tabs { display: none !important; }
+  .tournament-tabs.knockout-tabs { display: flex !important; }
   .knockout-list { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 12px !important; }
 }
 

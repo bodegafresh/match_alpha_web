@@ -474,7 +474,15 @@ function matchScore(match) {
   const homeScore = match.home_score ?? match.home?.score;
   const awayScore = match.away_score ?? match.away?.score;
   if (homeScore === null || homeScore === undefined || awayScore === null || awayScore === undefined) return '<div class="score pending">vs</div>';
-  return `<div class="score">${homeScore}<span>-</span>${awayScore}</div>`;
+  const penalties = (match.metadata && typeof match.metadata === 'object' && match.metadata.penalties && typeof match.metadata.penalties === 'object')
+    ? match.metadata.penalties
+    : null;
+  const homePen = penalties?.home;
+  const awayPen = penalties?.away;
+  const hasPenalties = homePen !== null && homePen !== undefined && awayPen !== null && awayPen !== undefined;
+  const regular = `<div class="score">${homeScore}<span>-</span>${awayScore}</div>`;
+  if (!hasPenalties) return regular;
+  return `${regular}<div class="score-penalties">Pen: ${homePen}-${awayPen}</div>`;
 }
 
 function statusClass(status) {
@@ -897,8 +905,10 @@ async function renderStandings(options = {}) {
 }
 
 function teamCatalogCard(team) {
+  const teamSlug = team.slug || team.team_slug;
+  const teamId = team.team_id || team.id;
   return `
-    <article class="card team-card clickable-card fade-in" data-team-slug="${escapeHtml(team.slug || team.team_slug)}" tabindex="0">
+    <article class="card team-card clickable-card fade-in" data-team-slug="${escapeHtml(teamSlug || '')}" data-team-id="${escapeHtml(teamId || '')}" tabindex="0">
       <div class="team-card-top">
         <div class="team-head">
           <div class="flag">${teamFlag(team)}</div>
@@ -998,11 +1008,25 @@ async function renderTeams(options = {}) {
   });
 
   root.querySelectorAll('[data-team-slug]').forEach((card) => {
-    card.addEventListener('click', () => openTeamModal(card.dataset.teamSlug));
+    card.addEventListener('click', () => {
+      const slug = card.dataset.teamSlug;
+      const teamId = card.dataset.teamId;
+      if (!slug && !teamId) return;
+      openTeamModal({ teamSlug: slug, teamId });
+    });
+    card.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      const slug = card.dataset.teamSlug;
+      const teamId = card.dataset.teamId;
+      if (!slug && !teamId) return;
+      openTeamModal({ teamSlug: slug, teamId });
+    });
   });
 }
 
-async function openTeamModal(teamSlug) {
+async function openTeamModal({ teamSlug, teamId } = {}) {
+  if (!teamSlug && !teamId) return;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal-card"><div class="loading-head"><span>Cargando equipo</span><i></i></div>${skeletonCards(2)}</div>`;
@@ -1011,7 +1035,8 @@ async function openTeamModal(teamSlug) {
     if (event.target === overlay) closeModal(overlay);
   });
   try {
-    const detail = await cached('web/team-detail', { team_slug: teamSlug }, 60000);
+    const params = teamSlug ? { team_slug: teamSlug } : { team_id: teamId };
+    const detail = await cached('web/team-detail', params, 60000);
     overlay.innerHTML = teamModalHtml(detail);
     overlay.querySelector('[data-close-modal]').addEventListener('click', () => closeModal(overlay));
     overlay.querySelectorAll('[data-modal-tab]').forEach((button) => {
@@ -1314,7 +1339,7 @@ function placeholderKnockoutCard(stage, index) {
 
 function tournamentTabsHtml(activeKey, views) {
   return `
-    <div class="knockout-tabs" role="tablist" aria-label="Secciones de torneo">
+    <div class="tournament-tabs knockout-tabs" role="tablist" aria-label="Secciones de torneo">
       ${views.map((view) => `
         <button class="${view.key === activeKey ? 'active' : ''}" data-tournament-view="${escapeHtml(view.key)}" type="button" role="tab" aria-selected="${view.key === activeKey ? 'true' : 'false'}">
           ${escapeHtml(view.label)}
