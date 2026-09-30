@@ -2619,6 +2619,49 @@ function statsKpiBar(calibration, buckets) {
     </div>`).join('')}</div>`;
 }
 
+// F4.6: daily model metrics history (Brier, log-loss, ECE, CLV, paper ROI) — last 30 days.
+function metricsHistoryChart(series) {
+  const id = 'metrics-history-chart';
+  if (!series.length) return `<div class="chart-wrap">${quantEmptyState('📈', 'Sin historial de métricas', 'La serie aparece cuando el loop diario registra métricas por competición.')}</div>`;
+  return `
+    <div class="chart-wrap"><canvas id="${id}" aria-label="${escapeHtml('Historial diario de métricas del modelo')}" role="img"></canvas></div>
+    <p style="font-size:.74rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI paper.')}</p>`;
+}
+
+function initMetricsHistoryChart(series) {
+  destroyChart('metrics-history-chart');
+  const canvas = document.getElementById('metrics-history-chart');
+  if (!canvas || !series.length || typeof Chart === 'undefined') return;
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const labels = series.map((p) => String(p.date || ''));
+  const line = (label, key, color, axis, dash) => ({
+    type: 'line', label, yAxisID: axis, data: series.map((p) => num(p[key])),
+    borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: 2, spanGaps: true, fill: false,
+    ...(dash ? { borderDash: [4, 4] } : {}),
+  });
+  new Chart(canvas, {
+    data: {
+      labels,
+      datasets: [
+        line('Brier', 'brier_score', 'rgba(53,194,255,.9)', 'y'),
+        line('Log-loss', 'log_loss', 'rgba(159,176,195,.9)', 'y'),
+        line('ECE', 'ece', 'rgba(244,197,66,.9)', 'y'),
+        line('CLV', 'clv_avg', 'rgba(30,215,96,.9)', 'y1', true),
+        line('ROI paper', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: '#9fb0c3', font: { size: 11 } } } },
+      scales: {
+        y: { position: 'left', ticks: { color: '#9fb0c3', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.06)' } },
+        y1: { position: 'right', ticks: { color: '#9fb0c3', font: { size: 10 }, callback: (v) => `${(v * 100).toFixed(1)}%` }, grid: { display: false } },
+        x: { ticks: { color: '#9fb0c3', font: { size: 9 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+      },
+    },
+  });
+}
+
 function statsRoadmapEmpty() {
   return `
     <div class="stats-roadmap">
@@ -2658,7 +2701,7 @@ async function renderStats(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando Stats</span><i></i></div></div>`;
   }
-  let calibration = [], buckets = [], decisions = [];
+  let calibration = [], buckets = [], decisions = [], history = [];
   try {
     const [calData, roiData, bankData] = await Promise.all([
       cached('calibration/summary', { limit: 5 }, 120000, options),
@@ -2673,10 +2716,18 @@ async function renderStats(options = {}) {
     root.innerHTML = `<div class="stats-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
     return;
   }
+  // Optional (F4.6): an older backend without the endpoint must not break the view.
+  try {
+    const histData = await cached('model/metrics/history', { days: 30 }, 300000, options);
+    history = Array.isArray(histData?.series) ? histData.series : [];
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    history = [];
+  }
 
   setStatus('Stats', `${decisions.length} picks`);
 
-  const hasData = decisions.length > 0 || calibration.length > 0;
+  const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0;
 
   root.innerHTML = `
     <div class="stats-view">
@@ -2684,6 +2735,10 @@ async function renderStats(options = {}) {
       <section class="stats-section">
         <h3>KPIs del Modelo</h3>
         ${statsKpiBar(calibration, buckets)}
+      </section>
+      <section class="stats-section">
+        <h3>Evolución diaria (30 días)</h3>
+        ${metricsHistoryChart(history)}
       </section>
       <section class="stats-section">
         <h3>Calibración (bucket chart)</h3>
@@ -2701,6 +2756,7 @@ async function renderStats(options = {}) {
 
   // Init charts after DOM painted (only if data exists)
   if (hasData) setTimeout(() => {
+    initMetricsHistoryChart(history);
     initCalibrationChart(calibration);
     initRoiChart(buckets);
     initPicksDonut(decisions);
