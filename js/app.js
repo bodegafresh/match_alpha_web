@@ -1064,7 +1064,9 @@ async function renderGenericTable(ctx) {
 function matchdayOf(match) {
   const md = match.matchday ?? match.round_number ?? match.metadata?.matchday ?? match.metadata?.round;
   if (md !== null && md !== undefined && md !== '') {
-    const n = Number(md);
+    // Provider round text such as "Regular Season - 12" (API-Football) → matchday 12.
+    const suffix = typeof md === 'string' && !/^round of/i.test(md.trim()) ? md.trim().match(/(\d+)$/) : null;
+    const n = suffix ? Number(suffix[1]) : Number(md);
     return Number.isFinite(n)
       ? { key: `md-${n}`, label: `Fecha ${n}`, sort: n }
       : { key: `md-${String(md)}`, label: String(md), sort: Number.MAX_SAFE_INTEGER - 1 };
