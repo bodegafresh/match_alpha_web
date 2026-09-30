@@ -27,7 +27,16 @@
   /* ── Text ── */
   --text:  #eef2f7;
   --muted: #8da4be;
-  --faint: #56718a;
+  --faint: #7a93ad; /* ≥4.5:1 on --bg (F3.9) */
+
+  /* ── Standings zones (F3.5) ── */
+  --zone-qualified: #18d96a;
+  --zone-playoff: #f5c842;
+  --zone-continental-a: #2ec4f7;
+  --zone-continental-b: #a78bfa;
+  --zone-relegation-playoff: #f59e42;
+  --zone-relegated: #f04f65;
+  --zone-eliminated: #7a93ad;
 
   /* ── Semantic palette ── */
   --accent:   #f5c842;
@@ -557,23 +566,71 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   letter-spacing: 0.06em; animation: pulse-live 2s ease-in-out infinite;
 }
 
-/* ═══════ Standings zone coloring (league table + group tables) ═══════ */
-.zone--promote td:first-child { border-left: 3px solid var(--ok); }
-.zone--europe  td:first-child { border-left: 3px solid var(--accent-2); }
-.zone--relegate td:first-child { border-left: 3px solid var(--danger); }
+/* ═══════ Standings zone coloring (driven by rules.zones, F3.5) ═══════ */
+.zone td:first-child { border-left: 3px solid var(--zone-color, transparent); }
+.zone--qualified          { --zone-color: var(--zone-qualified); }
+.zone--playoff            { --zone-color: var(--zone-playoff); }
+.zone--continental-a      { --zone-color: var(--zone-continental-a); }
+.zone--continental-b      { --zone-color: var(--zone-continental-b); }
+.zone--relegation-playoff { --zone-color: var(--zone-relegation-playoff); }
+.zone--relegated          { --zone-color: var(--zone-relegated); }
+.zone--eliminated         { --zone-color: var(--zone-eliminated); }
 
 .zone-legend-bar {
-  display: flex; gap: var(--sp-4); flex-wrap: wrap;
+  display: flex; gap: var(--sp-2) var(--sp-4); flex-wrap: wrap;
+  list-style: none; margin: 0;
   padding: var(--sp-3) var(--sp-4);
   font-size: 0.72rem; color: var(--muted);
 }
-.zone-legend {
+.zone-legend-bar li { display: inline-flex; align-items: center; gap: 6px; }
+.zone-swatch {
   display: inline-block; width: 10px; height: 10px;
-  border-radius: 2px; flex-shrink: 0;
+  border-radius: 2px; flex-shrink: 0; background: var(--zone-color, var(--faint));
 }
-.zone-legend--promote  { background: var(--ok); }
-.zone-legend--europe   { background: var(--accent-2); }
-.zone-legend--relegate { background: var(--danger); }
+.zone-legend-range { color: var(--faint); }
+
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ═══════ Stage selector / matchday pager (F3.4, F3.6) ═══════ */
+.stage-selector { margin-bottom: var(--sp-3); }
+.matchday-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.matchday-pager select {
+  flex: 1; max-width: 260px; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 6px 10px; font: inherit;
+}
+.matchday-pager button {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--line-2);
+  border-radius: var(--r-sm); padding: 6px 12px; font: inherit; cursor: pointer;
+}
+.matchday-pager button:disabled { opacity: .4; cursor: default; }
+.layout-notice { color: var(--muted); font-size: .78rem; margin: 0 0 var(--sp-3); }
+
+/* ═══════ Two-leg tie card (F3.3) ═══════ */
+.tie-card { display: grid; gap: .45rem; }
+.tie-legs { display: grid; gap: .3rem; font-size: .78rem; }
+.tie-leg { display: grid; grid-template-columns: 3.2rem 1fr auto; gap: .5rem; align-items: center; color: var(--muted); }
+.tie-leg b { color: var(--text); font-variant-numeric: tabular-nums; }
+.tie-leg-label { color: var(--faint); font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+.tie-aggregate {
+  display: flex; justify-content: space-between; align-items: center; gap: .5rem;
+  border-top: 1px solid var(--line); padding-top: .45rem; font-size: .8rem;
+}
+.tie-aggregate strong { font-variant-numeric: tabular-nums; }
+.tie-winner { color: var(--ok); font-weight: 700; font-size: .75rem; }
+.bracket-node-agg { color: var(--faint); font-size: .6rem; text-align: right; padding: 0 6px 2px; }
+
+/* ═══════ Error / retry (F3.10) ═══════ */
+.error-actions { margin-top: var(--sp-3); }
+.retry-btn {
+  background: var(--surface-3); color: var(--text); border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm); padding: 6px 14px; font: inherit; cursor: pointer;
+}
 
 /* ═══════ Knockout bracket ═══════ */
 .knockout-view { display: grid; gap: .9rem; touch-action: pan-y; }
@@ -978,7 +1035,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .chip--warn   { background: rgba(245, 200, 66, .12); color: var(--warn);   border-color: rgba(245, 200, 66, .25); }
 .chip--blue   { background: rgba(46, 196, 247, .11); color: var(--accent-2); border-color: rgba(46, 196, 247, .22); }
 .chip--danger { background: rgba(240, 79, 101, .12); color: var(--danger); border-color: rgba(240, 79, 101, .22); }
-.chip--muted  { background: rgba(86, 113, 138, .14); color: var(--faint);  border-color: rgba(86, 113, 138, .2); }
+.chip--muted  { background: rgba(122, 147, 173, .14); color: var(--faint);  border-color: rgba(86, 113, 138, .2); }
 .chip--ai     { background: rgba(167,139,250,.13);   color: var(--ai);      border-color: rgba(167,139,250,.28); }
 
 /* ═══════ News view ═══════ */

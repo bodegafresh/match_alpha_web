@@ -20,38 +20,39 @@
         <h1>Match Alpha</h1>
         <button class="league-picker-btn" id="league-picker-btn" aria-haspopup="listbox" aria-expanded="false">
           <span id="league-picker-label">Mundial FIFA 2026</span>
-          <span class="league-picker-chevron">▾</span>
+          <span class="league-picker-chevron" aria-hidden="true">▾</span>
         </button>
       </div>
     </div>
     <div class="league-picker-dropdown" id="league-picker-dropdown" role="listbox" aria-label="Seleccionar competición" hidden></div>
-    <nav class="tabs" aria-label="Secciones">
-      <button class="tab active" data-view="today">Partidos</button>
-      <button class="tab" data-view="standings">Posiciones</button>
-      <button class="tab" data-view="teams">Equipos</button>
-      <button class="tab" data-view="tournament">Torneo</button>
-      <button class="tab" data-view="news">Noticias</button>
-      <button class="tab" data-view="elo">ELO</button>
-      <button class="tab tab--quant" data-view="ev">EV+</button>
-      <button class="tab tab--quant" data-view="model">Modelo</button>
-      <button class="tab tab--quant" data-view="stats">Stats</button>
+    <nav class="tabs" aria-label="Secciones" role="tablist">
+      <button class="tab active" data-view="today" id="tab-today" type="button" role="tab" aria-controls="view-root" aria-selected="true">Partidos</button>
+      <button class="tab" data-view="standings" id="tab-standings" type="button" role="tab" aria-controls="view-root" aria-selected="false">Posiciones</button>
+      <button class="tab" data-view="teams" id="tab-teams" type="button" role="tab" aria-controls="view-root" aria-selected="false">Equipos</button>
+      <button class="tab" data-view="tournament" id="tab-tournament" type="button" role="tab" aria-controls="view-root" aria-selected="false">Torneo</button>
+      <button class="tab" data-view="news" id="tab-news" type="button" role="tab" aria-controls="view-root" aria-selected="false">Noticias</button>
+      <button class="tab" data-view="elo" id="tab-elo" type="button" role="tab" aria-controls="view-root" aria-selected="false">ELO</button>
+      <button class="tab tab--quant" data-view="ev" id="tab-ev" type="button" role="tab" aria-controls="view-root" aria-selected="false">EV+</button>
+      <button class="tab tab--quant" data-view="model" id="tab-model" type="button" role="tab" aria-controls="view-root" aria-selected="false">Modelo</button>
+      <button class="tab tab--quant" data-view="stats" id="tab-stats" type="button" role="tab" aria-controls="view-root" aria-selected="false">Stats</button>
     </nav>
   </header>
 
   <main class="shell">
     <section id="status-strip" class="status-strip">
       <span id="status-text"></span>
-      <button id="refresh-btn" class="icon-btn" type="button" title="Actualizar" aria-label="Actualizar">↻</button>
+      <button id="refresh-btn" class="icon-btn" type="button" title="Actualizar" aria-label="Actualizar"><span aria-hidden="true">↻</span></button>
     </section>
     <div id="date-filter-bar" hidden></div>
-    <section id="view-root" class="view-root"></section>
+    <section id="view-root" class="view-root" role="tabpanel" aria-labelledby="tab-today"></section>
   </main>
 
   <template id="login-template">
     <form class="login-box" id="login-form">
       <h2>Acceso</h2>
-      <p>Ingresa la clave configurada en el Worker para consultar la API del proyecto.</p>
-      <input id="api-key-input" type="password" placeholder="WEB_KEY" autocomplete="current-password">
+      <p>Ingresa la clave de lectura (solo consulta) para acceder a la API del proyecto. Nunca uses aquí la clave interna.</p>
+      <label for="api-key-input" class="sr-only">Clave de lectura</label>
+      <input id="api-key-input" type="password" placeholder="Clave de lectura" autocomplete="off">
       <button type="submit">Entrar</button>
       <small id="login-error"></small>
     </form>

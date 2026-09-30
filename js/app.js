@@ -18,6 +18,9 @@ const state = {
   activeController: null,
   knockoutStage: null,
   tournamentView: null,
+  tableStage: null,
+  matchday: null,
+  hasLive: false,
   eloRatingType: 'INTERNATIONAL',
   teamsFilters: {
     search: '',
@@ -56,7 +59,36 @@ function saveKey(value) { localStorage.setItem(KEY_STORAGE, value || ''); }
 function clearKey() { localStorage.removeItem(KEY_STORAGE); }
 
 function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]));
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+
+// Coerce API values to finite numbers before interpolating into HTML.
+function num(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// Only allow absolute http(s) URLs in hrefs coming from the API.
+function safeUrl(value) {
+  try {
+    const url = new URL(String(value || ''), location.href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '#';
+  } catch {
+    return '#';
+  }
+}
+
+// Decorative emoji/icon: hidden from assistive tech.
+function deco(icon) {
+  return `<span aria-hidden="true">${escapeHtml(icon)}</span>`;
+}
+
+function isLiveStatus(status) {
+  return ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(String(status || '').toUpperCase());
+}
+
+function isFinishedStatus(status) {
+  return ['FINISHED', 'FT', 'AET', 'PEN'].includes(String(status || '').toUpperCase());
 }
 
 function ymd(date) {
@@ -198,9 +230,12 @@ function knockoutStageKey(match) {
 }
 
 function teamFlag(team) {
-  if (team?.flag_asset) return `<img class="flag-img" src="${escapeHtml(team.flag_asset)}" alt="" loading="lazy">`;
-  if (team?.flag_emoji) return escapeHtml(team.flag_emoji);
-  return team?.is_placeholder ? '<span class="placeholder-icon">◇</span>' : '🏳️';
+  if (team?.flag_asset) {
+    const src = safeUrl(team.flag_asset);
+    if (src !== '#') return `<img class="flag-img" src="${escapeHtml(src)}" alt="" loading="lazy">`;
+  }
+  if (team?.flag_emoji) return deco(team.flag_emoji);
+  return team?.is_placeholder ? '<span class="placeholder-icon" aria-hidden="true">◇</span>' : deco('🏳️');
 }
 
 function layoutKeyToView(key) {
@@ -219,12 +254,15 @@ function layoutKeyToView(key) {
   }[key] || key;
 }
 
+// Generic, format-agnostic fallback (F3.8): one table + a match list.
+// Used only when the layout API is unreachable.
 function fallbackLayout() {
   return {
+    _fallback: true,
     capabilities: {
-      has_groups: true,
-      has_league_table: false,
-      has_knockout: true,
+      has_groups: false,
+      has_league_table: true,
+      has_knockout: false,
       has_standings: true,
       has_teams: true,
       has_tournament: true,
@@ -245,17 +283,10 @@ function fallbackLayout() {
       ],
     },
     tournament_views: [
-      { key: 'groups', label: 'Grupos', render_mode: 'GROUP_TABLES', enabled: true, order: 10 },
-      { key: 'knockout', label: 'Eliminatoria', render_mode: 'BRACKET', enabled: true, order: 20 },
-      { key: 'qualified', label: 'Clasificados', render_mode: 'QUALIFICATION_SUMMARY', enabled: true, order: 30 },
+      { key: 'table', label: 'Tabla', render_mode: 'GENERIC', enabled: true, order: 10 },
+      { key: 'fixtures', label: 'Fechas', render_mode: 'MATCH_LIST', enabled: true, order: 20 },
     ],
-    stages: _FALLBACK_KNOCKOUT_STAGES.map((stage, index) => ({
-      stage_code: stage.key,
-      stage_label: stage.title,
-      stage_order: index + 1,
-      view_type: 'BRACKET_ROUND',
-      match_count: stage.count,
-    })),
+    stages: [],
   };
 }
 
@@ -264,7 +295,7 @@ async function ensureLayout(options = {}) {
   try {
     state.layout = await cached(`competitions/${SEASON}/layout`, {}, 300000, options);
   } catch (error) {
-    console.warn('No se pudo cargar layout de competencia, usando fallback local.', error);
+    console.warn('No se pudo cargar layout de competencia, usando fallback local.', error?.message || error);
     state.layout = fallbackLayout();
   }
   applyCompetitionLayout();
@@ -319,7 +350,7 @@ function applyCompetitionLayout() {
       navByView[view] = fallback;
     }
   }
-  document.querySelectorAll('.tab').forEach((button) => {
+    document.querySelectorAll('.tab').forEach((button) => {
     const item = navByView[button.dataset.view];
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
@@ -340,19 +371,60 @@ function applyCompetitionLayout() {
   }
 }
 
+const KNOCKOUT_VIEW_TYPES = ['BRACKET_ROUND', 'TWO_LEG_TIE'];
+
 function knockoutStageDefinitions() {
   const layoutStages = state.layout?.stages || [];
   const stages = layoutStages
-    .filter((stage) => String(stage.view_type || '').toUpperCase() === 'BRACKET_ROUND')
+    .filter((stage) => KNOCKOUT_VIEW_TYPES.includes(String(stage.view_type || '').toUpperCase()))
     .sort((a, b) => (a.stage_order || 0) - (b.stage_order || 0))
-    .map((stage) => ({
-      key: stage.stage_code || stage.stage_name,
-      title: stage.stage_label || stage.stage_name || stage.stage_code || 'Eliminatoria',
-      count: stage.expected_match_count || stage.match_count || stage.rules?.expected_matches || 0,
-      viewType: stage.view_type || 'BRACKET_ROUND',
-    }))
+    .map((stage) => {
+      const viewType = String(stage.view_type || 'BRACKET_ROUND').toUpperCase();
+      const legs = num(stage.rules?.legs, viewType === 'TWO_LEG_TIE' ? 2 : 1) || 1;
+      const matchCount = num(stage.expected_match_count || stage.match_count || stage.rules?.expected_matches);
+      return {
+        key: stage.stage_code || stage.stage_name,
+        title: stage.stage_label || stage.stage_name || stage.stage_code || 'Eliminatoria',
+        count: matchCount,
+        legs,
+        // Slots in the bracket = ties, not matches.
+        slots: legs > 1 ? Math.ceil(matchCount / legs) : matchCount,
+        viewType,
+      };
+    })
     .filter((stage) => stage.key);
-  return stages.length ? stages : _FALLBACK_KNOCKOUT_STAGES;
+  if (stages.length) return stages;
+  if (state.layout && !state.layout._fallback && (state.layout.stages || []).length) return [];
+  return _FALLBACK_KNOCKOUT_STAGES.map((stage) => ({ ...stage, legs: 1, slots: stage.count, viewType: 'BRACKET_ROUND' }));
+}
+
+function layoutStage(key) {
+  return (state.layout?.stages || []).find((s) => (s.stage_code || s.stage_name) === key) || null;
+}
+
+const REQUEST_TIMEOUT_MS = 30000;
+
+// Combines the caller's abort signal with a timeout. Uses AbortSignal.timeout/any
+// when available and falls back to a manual setTimeout + AbortController.
+function requestSignal(outerSignal, timeoutMs) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout && (AbortSignal.any || !outerSignal)) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = outerSignal ? AbortSignal.any([timeoutSignal, outerSignal]) : timeoutSignal;
+    return { signal, cancel: () => {}, timedOut: () => timeoutSignal.aborted };
+  }
+  const controller = new AbortController();
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; controller.abort(); }, timeoutMs);
+  const onAbort = () => controller.abort();
+  if (outerSignal) {
+    if (outerSignal.aborted) controller.abort();
+    else outerSignal.addEventListener('abort', onAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    cancel: () => { clearTimeout(timer); outerSignal?.removeEventListener('abort', onAbort); },
+    timedOut: () => expired,
+  };
 }
 
 async function apiGet(path, params = {}, options = {}) {
@@ -367,22 +439,24 @@ async function apiGet(path, params = {}, options = {}) {
   const key = savedKey();
   const headers = key ? { Authorization: `Bearer ${key}` } : {};
   // 30-second timeout so the page doesn't freeze when Render backend is waking up
-  const REQUEST_TIMEOUT_MS = 30000;
-  const timeoutSignal = AbortSignal.timeout ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : null;
-  const signals = [timeoutSignal, options.signal].filter(Boolean);
-  const signal = signals.length > 1 && AbortSignal.any ? AbortSignal.any(signals) : (signals[0] || undefined);
-  const response = await fetch(url, { headers, signal }).catch((err) => {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      const te = new Error('El servidor tardó demasiado en responder. Puede estar despertando — intenta de nuevo en unos segundos.');
-      te.name = err.name;
+  const { signal, cancel, timedOut } = requestSignal(options.signal, REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, { headers, signal });
+  } catch (err) {
+    if (err.name === 'TimeoutError' || timedOut()) {
+      const te = new Error('Servidor despertando: tardó demasiado en responder. Intenta de nuevo en unos segundos.');
+      te.name = 'TimeoutError';
       throw te;
     }
     throw err;
-  });
+  } finally {
+    cancel();
+  }
   const json = await response.json().catch(() => ({}));
   if (response.status === 401) {
     clearKey();
-    renderLogin('Clave inválida o no configurada.');
+    renderLogin('Clave de lectura inválida o no configurada.');
     throw new Error('Unauthorized');
   }
   if (!response.ok || json.ok === false) {
@@ -423,6 +497,7 @@ function updateTabs() {
     const active = button.dataset.view === state.view;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', active ? 'true' : 'false');
+    if (active && button.id) root.setAttribute('aria-labelledby', button.id);
   });
 }
 
@@ -463,26 +538,38 @@ function loading(label = 'Cargando') {
 }
 
 function errorState(error) {
-  root.innerHTML = `<div class="error">${escapeHtml(error.message || error)}</div>`;
+  const waking = error?.name === 'TimeoutError';
+  const title = waking ? 'Servidor despertando' : 'No se pudo cargar';
+  root.innerHTML = `
+    <div class="error" role="alert">
+      <strong>${escapeHtml(title)}</strong>
+      <div>${escapeHtml(error?.message || error)}</div>
+      <div class="error-actions"><button type="button" class="retry-btn" data-retry>Reintentar</button></div>
+    </div>`;
+  root.querySelector('[data-retry]')?.addEventListener('click', () => render());
 }
 
 function emptyState(text) {
   return `<div class="empty">${escapeHtml(text)}</div>`;
 }
 
+function matchPenalties(match) {
+  const meta = match?.metadata && typeof match.metadata === 'object' ? match.metadata : {};
+  const pen = meta.penalties && typeof meta.penalties === 'object' ? meta.penalties : {};
+  const home = match?.home_penalty_score ?? match?.penalty_home ?? match?.home_penalties ?? pen.home;
+  const away = match?.away_penalty_score ?? match?.penalty_away ?? match?.away_penalties ?? pen.away;
+  if (home === null || home === undefined || away === null || away === undefined) return null;
+  return { home: num(home), away: num(away) };
+}
+
 function matchScore(match) {
   const homeScore = match.home_score ?? match.home?.score;
   const awayScore = match.away_score ?? match.away?.score;
   if (homeScore === null || homeScore === undefined || awayScore === null || awayScore === undefined) return '<div class="score pending">vs</div>';
-  const penalties = (match.metadata && typeof match.metadata === 'object' && match.metadata.penalties && typeof match.metadata.penalties === 'object')
-    ? match.metadata.penalties
-    : null;
-  const homePen = penalties?.home;
-  const awayPen = penalties?.away;
-  const hasPenalties = homePen !== null && homePen !== undefined && awayPen !== null && awayPen !== undefined;
-  const regular = `<div class="score">${homeScore}<span>-</span>${awayScore}</div>`;
-  if (!hasPenalties) return regular;
-  return `${regular}<div class="score-penalties">Pen: ${homePen}-${awayPen}</div>`;
+  const pen = matchPenalties(match);
+  const regular = `<div class="score">${num(homeScore)}<span>-</span>${num(awayScore)}</div>`;
+  if (!pen) return regular;
+  return `${regular}<div class="score-penalties">Pen: ${pen.home}-${pen.away}</div>`;
 }
 
 function statusClass(status) {
@@ -541,14 +628,14 @@ function weatherHtml(match) {
   // Label distinguishes forecast (at kickoff) vs current conditions
   const label = weather.forecast_type === 'kickoff_hour' ? 'Pronóstico al inicio' : '';
   const labelHtml = label ? `<span class="weather-label">${escapeHtml(label)}</span>` : '';
-  return parts.length ? `<div class="weather">${labelHtml}<span>${weatherIcon(weather.condition)}</span>${escapeHtml(parts.join(' · '))}</div>` : '';
+  return parts.length ? `<div class="weather">${labelHtml}<span aria-hidden="true">${weatherIcon(weather.condition)}</span>${escapeHtml(parts.join(' · '))}</div>` : '';
 }
 
 function venueDetailHtml(match) {
   if (!match.venue) return '<div class="venue">Sede por definir</div>';
   const main = [match.venue.display_name, match.venue.city].filter(Boolean).join(', ');
   const local = localVenueTimeLabel(match);
-  return `<div class="venue">📍 ${escapeHtml(main)}${local ? ` · ${escapeHtml(local)}` : ''}</div>`;
+  return `<div class="venue">${deco('📍')} ${escapeHtml(main)}${local ? ` · ${escapeHtml(local)}` : ''}</div>`;
 }
 
 function matchTimeHtml(match) {
@@ -564,7 +651,7 @@ function matchCard(match) {
   const group = matchGroupLabel(match);
   const stage = matchStageLabel(match);
   const meta = [stage, group].filter(Boolean).join(' · ');
-  const isLive = ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(match.status);
+  const isLive = isLiveStatus(match.status);
   return `
     <article class="card match-card fade-in" data-status="${escapeHtml(match.status || 'SCHEDULED')}">
       <div class="match-meta">
@@ -593,7 +680,7 @@ function todayParams() {
   }
   if (state.dateMode === 'upcoming') {
     const range = chileOperationalRange(now, 1);
-    return { kickoff_from: range.kickoff_from, kickoff_to: '2026-07-20T05:00:00.000Z' };
+    return { kickoff_from: range.kickoff_from, kickoff_to: chileOperationalRange(now, 30).kickoff_to };
   }
   const range = chileOperationalRange(now, 0);
   return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
@@ -612,7 +699,7 @@ function matchesOverviewParams() {
     tomorrow_from: tomorrow.kickoff_from,
     tomorrow_to: tomorrow.kickoff_to,
     upcoming_from: tomorrow.kickoff_from,
-    upcoming_to: '2026-07-20T05:00:00.000Z',
+    upcoming_to: chileOperationalRange(now, 30).kickoff_to,
     weather_refresh_limit: '8'
   };
 }
@@ -629,8 +716,8 @@ function renderDateToolbar() {
       <div class="toolbar">
         <div class="segment" role="tablist" aria-label="Fechas">
           ${dateModes.map(([mode, label, icon]) => `
-            <button class="${state.dateMode === mode ? 'active' : ''}" data-date-mode="${mode}" type="button">
-              <span>${escapeHtml(icon)}</span>${escapeHtml(label)}
+            <button class="${state.dateMode === mode ? 'active' : ''}" data-date-mode="${mode}" type="button" role="tab" aria-selected="${state.dateMode === mode ? 'true' : 'false'}" aria-controls="view-root">
+              ${deco(icon)}${escapeHtml(label)}
             </button>`).join('')}
         </div>
       </div>`;
@@ -684,6 +771,7 @@ async function renderToday(options = {}) {
   if (!options.silent && !options.localOnly && !cachedOverview) loading('Partidos');
   const data = cachedOverview && options.localOnly ? cachedOverview.data : await getMatchesOverview(options);
   const matches = data[state.dateMode] || [];
+  state.hasLive = ['yesterday', 'today', 'tomorrow'].some((mode) => (data[mode] || []).some((m) => isLiveStatus(m.status)));
   setStatus('Partidos', `${matches.length} registros`);
 
   // Group by date, then by kickoff time within each date
@@ -700,7 +788,7 @@ async function renderToday(options = {}) {
     ? Object.keys(byDate).map((dateKey) => {
         const timeBlocks = Object.values(byDate[dateKey]).sort((a, b) => (a.kickoffAt < b.kickoffAt ? -1 : 1));
         const blocksHtml = timeBlocks.map((block) => {
-          const hasLive = block.matches.some((m) => ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(m.status));
+          const hasLive = block.matches.some((m) => isLiveStatus(m.status));
           const count = block.matches.length;
           return `
             <div class="kickoff-block">
@@ -729,108 +817,321 @@ async function renderToday(options = {}) {
 }
 
 // ─── Stage view renderers ─────────────────────────────────────────────────────
-// Each renderer receives pre-fetched data and layout context.
-// renderStandings() is the dispatch entry point — it reads view_type from layout
-// and delegates to the correct renderer. Adding a new competition format only
-// requires registering a new renderer here; the dispatch table handles the rest.
+// RENDERERS (defined after the knockout helpers) maps a layout render_mode /
+// view_type to an async renderer `(ctx) => html`. Unknown modes fall back to
+// renderGenericTable / renderMatchList, so no render_mode ends in an error.
 
-const STANDINGS_RENDERERS = {
-  GROUP_TABLES: renderGroupTablesView,
-  LEAGUE_TABLE: renderLeagueTableView,
+const ZONE_LABELS = {
+  QUALIFIED: 'Clasificado',
+  PLAYOFF: 'Playoff',
+  CONTINENTAL_A: 'Copa internacional',
+  CONTINENTAL_B: 'Copa internacional (2)',
+  RELEGATION_PLAYOFF: 'Liguilla de descenso',
+  RELEGATED: 'Descenso',
+  ELIMINATED: 'Eliminado',
 };
 
-function _standingsRow(row, index, zoneCls = '') {
-  const pos = row.position || index + 1;
+function zoneClass(code) {
+  return `zone zone--${String(code).toLowerCase().replace(/_/g, '-')}`;
+}
+
+// Zones come from stage.rules.zones when present; otherwise derived from the
+// legacy promotion_spots / relegation_spots / qualifies fields.
+function zonesFromRules(rules = {}, total = 0, viewType = '', { groupDefault = 0 } = {}) {
+  if (Array.isArray(rules.zones) && rules.zones.length) {
+    return rules.zones
+      .map((zone) => {
+        const code = String(zone?.code || '').toUpperCase();
+        const safeCode = ZONE_LABELS[code] ? code : 'QUALIFIED';
+        return {
+          from: num(zone?.from),
+          to: num(zone?.to),
+          code: safeCode,
+          label: String(zone?.label || ZONE_LABELS[safeCode]),
+        };
+      })
+      .filter((zone) => zone.from > 0 && zone.to >= zone.from);
+  }
+  const zones = [];
+  const promote = num(rules.promotion_spots ?? rules.qualifies ?? rules.qualifiers_per_group ?? groupDefault);
+  const playoff = num(rules.playoff_spots);
+  const relegate = num(rules.relegation_spots);
+  if (String(viewType).toUpperCase() === 'LEAGUE_PHASE_TABLE' && !promote && !playoff && total) {
+    // UCL-style default: top 8 direct, 9-24 playoff, rest eliminated.
+    zones.push({ from: 1, to: Math.min(8, total), code: 'QUALIFIED', label: 'Octavos directo' });
+    if (total > 8) zones.push({ from: 9, to: Math.min(24, total), code: 'PLAYOFF', label: 'Playoff' });
+    if (total > 24) zones.push({ from: 25, to: total, code: 'ELIMINATED', label: 'Eliminado' });
+    return zones;
+  }
+  if (promote > 0) zones.push({ from: 1, to: promote, code: 'QUALIFIED', label: ZONE_LABELS.QUALIFIED });
+  if (playoff > 0) zones.push({ from: promote + 1, to: promote + playoff, code: 'PLAYOFF', label: ZONE_LABELS.PLAYOFF });
+  if (relegate > 0 && total > relegate) zones.push({ from: total - relegate + 1, to: total, code: 'RELEGATED', label: ZONE_LABELS.RELEGATED });
+  return zones;
+}
+
+function zoneForPosition(zones, position) {
+  return zones.find((zone) => position >= zone.from && position <= zone.to) || null;
+}
+
+function zoneLegendHtml(zones) {
+  if (!zones.length) return '';
+  return `
+    <ul class="zone-legend-bar" aria-label="Leyenda de zonas">
+      ${zones.map((zone) => `
+        <li class="${zoneClass(zone.code)}">
+          <span class="zone-swatch" aria-hidden="true"></span>
+          ${escapeHtml(zone.label)}
+          <span class="zone-legend-range">(${zone.from === zone.to ? zone.from : `${zone.from}–${zone.to}`})</span>
+        </li>`).join('')}
+    </ul>`;
+}
+
+function _standingsRow(row, index, zone = null) {
+  const pos = num(row.position, index + 1) || index + 1;
   const posCls = pos <= 3 ? `standings-row--${pos === 1 ? '1st' : pos === 2 ? '2nd' : '3rd'}` : '';
-  const cls = [posCls, zoneCls].filter(Boolean).join(' ');
+  const cls = [posCls, zone ? zoneClass(zone.code) : ''].filter(Boolean).join(' ');
   return `
     <tr${cls ? ` class="${cls}"` : ''}>
-      <td>${pos}</td>
-      <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name)}</strong></td>
-      <td><strong>${row.points}</strong></td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${row.goals_for}</td><td>${row.goals_against}</td><td>${row.goal_difference}</td>
+      <td>${pos}${zone ? `<span class="sr-only"> (${escapeHtml(zone.label)})</span>` : ''}</td>
+      <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name || row.display_name || '-')}</strong></td>
+      <td><strong>${num(row.points)}</strong></td><td>${num(row.played)}</td><td>${num(row.wins)}</td><td>${num(row.draws)}</td><td>${num(row.losses)}</td><td>${num(row.goals_for)}</td><td>${num(row.goals_against)}</td><td>${num(row.goal_difference)}</td>
     </tr>`;
 }
 
-function _standingsTable(rows, zoneResolver = () => '') {
+function _standingsTable(rows, zones = []) {
   return `
     <div class="card table-card">
       <table>
         <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
-        <tbody>${rows.map((row, i) => _standingsRow(row, i, zoneResolver(row, i))).join('')}</tbody>
+        <tbody>${rows.map((row, i) => _standingsRow(row, i, zoneForPosition(zones, num(row.position, i + 1) || i + 1))).join('')}</tbody>
       </table>
     </div>`;
 }
 
-function renderGroupTablesView(groups) {
+function sortStandingRows(rows) {
+  return [...rows].sort((a, b) => {
+    if (num(b.points) !== num(a.points)) return num(b.points) - num(a.points);
+    if (num(b.goal_difference) !== num(a.goal_difference)) return num(b.goal_difference) - num(a.goal_difference);
+    return num(b.goals_for) - num(a.goals_for);
+  }).map((row, i) => ({ ...row, position: i + 1 }));
+}
+
+// Pick the standings groups that belong to a layout stage (layout stage.groups
+// lists group ids/codes). Falls back to every group when nothing matches.
+function groupsForStage(groups, stage) {
+  const refs = new Set((stage?.groups || []).flatMap((g) => [g?.group_id, g?.group_code, typeof g === 'string' ? g : null]).filter(Boolean).map(String));
+  if (!refs.size) return groups;
+  const filtered = groups.filter((g) => refs.has(String(g.group_id)) || refs.has(String(g.group_code)));
+  return filtered.length ? filtered : groups;
+}
+
+async function fetchStandingsGroups(options = {}, extraParams = {}) {
+  const data = await cached('web/standings', extraParams, 90000, options);
+  return data.groups || [];
+}
+
+function renderGroupTablesView(groups, stageRules = null) {
   const sorted = [...groups].sort((a, b) => (a.group_order || 0) - (b.group_order || 0));
   return sorted.map((group) => {
-    const rows = [...(group.standings || [])].sort((a, b) => (a.position || 99) - (b.position || 99));
+    const rows = [...(group.standings || [])].sort((a, b) => num(a.position, 99) - num(b.position, 99));
+    // Legacy default of 2 qualifiers only when the layout gives no rules at all.
+    const rules = { ...(stageRules || {}), ...(group.rules || {}) };
+    const hasRules = stageRules !== null || group.rules;
+    const zones = zonesFromRules(rules, rows.length, 'GROUP_TABLES', { groupDefault: hasRules ? 0 : 2 });
     return `
     <section class="group-block fade-in">
       <h2 class="section-title">${escapeHtml(groupLabel(group.group_name))}</h2>
-      ${_standingsTable(rows, (row, i) => {
-        const pos = row.position || i + 1;
-        const qualify = group.rules?.promotion_spots ?? 2;
-        if (pos <= qualify) return 'zone--promote';
-        return '';
-      })}
+      ${_standingsTable(rows, zones)}
+      ${zoneLegendHtml(zones)}
     </section>`;
   }).join('');
 }
 
-function renderLeagueTableView(groups, stageRules = {}) {
+function renderLeagueTableView(groups, stageRules = {}, viewType = 'LEAGUE_TABLE') {
+  const single = groups.length === 1;
   const allRows = groups.flatMap((g) => g.standings || []);
-  const sorted = [...allRows].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.goal_difference !== a.goal_difference) return b.goal_difference - a.goal_difference;
-    return b.goals_for - a.goals_for;
-  }).map((row, i) => ({ ...row, position: i + 1 }));
-
-  const promoteSpots = stageRules.promotion_spots ?? 0;
-  const euroSpots    = stageRules.europe_spots    ?? 0;
-  const relegateSpots = stageRules.relegation_spots ?? 0;
-  const total = sorted.length;
-
-  const zoneResolver = (row) => {
-    const pos = row.position;
-    if (promoteSpots > 0 && pos <= promoteSpots)                          return 'zone--promote';
-    if (euroSpots    > 0 && pos <= promoteSpots + euroSpots)              return 'zone--europe';
-    if (relegateSpots > 0 && pos > total - relegateSpots)                 return 'zone--relegate';
-    return '';
-  };
-
-  const legend = [
-    promoteSpots  > 0 ? `<span class="zone-legend zone-legend--promote"></span> Clasificación` : '',
-    euroSpots     > 0 ? `<span class="zone-legend zone-legend--europe"></span> Europa`          : '',
-    relegateSpots > 0 ? `<span class="zone-legend zone-legend--relegate"></span> Descenso`     : '',
-  ].filter(Boolean).join('');
-
+  const hasPositions = single && allRows.every((row) => num(row.position) > 0);
+  const sorted = hasPositions
+    ? [...allRows].sort((a, b) => num(a.position) - num(b.position))
+    : sortStandingRows(allRows);
+  const zones = zonesFromRules(stageRules, sorted.length, viewType);
   return `
     <section class="group-block fade-in">
-      ${_standingsTable(sorted, zoneResolver)}
-      ${legend ? `<div class="zone-legend-bar">${legend}</div>` : ''}
+      ${_standingsTable(sorted, zones)}
+      ${zoneLegendHtml(zones)}
     </section>`;
 }
 
-async function renderMatchListView(stageCode, stageTitle, options = {}) {
-  const data = await cached('web/matches', { stage_code: stageCode }, 90000, options);
-  const matches = data.matches || data.items || [];
-  if (!matches.length) return emptyState(`Sin partidos para ${escapeHtml(stageTitle)}.`);
+function aggregateStandings(groupSets) {
+  const byTeam = new Map();
+  for (const row of groupSets.flat().flatMap((g) => g.standings || [])) {
+    const key = row.team_id || row.team_slug || row.team_name;
+    if (!key) continue;
+    const acc = byTeam.get(key) || { ...row, points: 0, played: 0, wins: 0, draws: 0, losses: 0, goals_for: 0, goals_against: 0, goal_difference: 0 };
+    for (const field of ['points', 'played', 'wins', 'draws', 'losses', 'goals_for', 'goals_against', 'goal_difference']) {
+      acc[field] = num(acc[field]) + num(row[field]);
+    }
+    byTeam.set(key, acc);
+  }
+  return sortStandingRows([...byTeam.values()]);
+}
 
-  const byKickoff = matches.reduce((acc, m) => {
-    const dt = new Date(m.kickoff_at);
-    const key = dt.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: CHILE_TIMEZONE });
-    (acc[key] ||= []).push(m);
-    return acc;
-  }, {});
+// Stage selector for Apertura/Clausura (F3.6).
+function tableStageOptions(viewType = 'LEAGUE_TABLE') {
+  const stages = (state.layout?.stages || [])
+    .filter((s) => String(s.view_type || '').toUpperCase() === viewType)
+    .sort((a, b) => (a.stage_order || 0) - (b.stage_order || 0));
+  const options = stages.map((s) => ({ key: s.stage_code || s.stage_name, title: s.stage_label || s.stage_name || s.stage_code, stage: s }))
+    .filter((o) => o.key);
+  const aggregateWith = stages.map((s) => s.rules?.aggregate_with).find(Boolean);
+  if (aggregateWith) options.push({ key: '__aggregate', title: 'Acumulada', aggregateWith: String(aggregateWith) });
+  return options;
+}
 
-  return Object.entries(byKickoff).map(([dateLabel, dayMatches]) => `
-    <section class="kickoff-block fade-in">
-      <header class="kickoff-header">
-        <span class="kickoff-time">${escapeHtml(dateLabel)}</span>
-      </header>
-      <div class="grid">${dayMatches.map(matchCard).join('')}</div>
-    </section>`).join('');
+function subTabsHtml(items, activeKey, dataAttr, label) {
+  return `
+    <div class="knockout-tabs stage-selector" role="tablist" aria-label="${escapeHtml(label)}">
+      ${items.map((item) => `
+        <button class="${item.key === activeKey ? 'active' : ''}" ${dataAttr}="${escapeHtml(item.key)}" type="button" role="tab"
+                aria-selected="${item.key === activeKey ? 'true' : 'false'}" aria-controls="tournament-panel">
+          ${escapeHtml(item.title)}
+        </button>`).join('')}
+    </div>`;
+}
+
+async function renderLeagueTableMode(ctx) {
+  const viewType = String(ctx.viewType || 'LEAGUE_TABLE').toUpperCase();
+  const options = tableStageOptions(viewType);
+  const groups = await fetchStandingsGroups(ctx.options);
+  if (!options.length) {
+    return renderLeagueTableView(groups, {}, viewType) || emptyState('No hay tabla disponible.');
+  }
+  if (!state.tableStage || !options.some((o) => o.key === state.tableStage)) state.tableStage = options[0].key;
+  const selected = options.find((o) => o.key === state.tableStage) || options[0];
+  const selector = options.length > 1 ? subTabsHtml(options, selected.key, 'data-table-stage', 'Etapa') : '';
+  let body;
+  if (selected.key === '__aggregate') {
+    let sibling = [];
+    try {
+      sibling = await fetchStandingsGroups(ctx.options, { season: selected.aggregateWith });
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+    }
+    const rows = aggregateStandings([groups, sibling]);
+    const baseRules = options[0]?.stage?.rules || {};
+    const zones = zonesFromRules(baseRules.aggregate_zones ? { zones: baseRules.aggregate_zones } : {}, rows.length, viewType);
+    body = rows.length
+      ? `<section class="group-block fade-in">${_standingsTable(rows, zones)}${zoneLegendHtml(zones)}
+          ${sibling.length ? '' : '<p class="layout-notice">No se pudo cargar la otra etapa; se muestra solo la actual.</p>'}</section>`
+      : emptyState('No hay tabla acumulada disponible.');
+  } else {
+    const stageGroups = groupsForStage(groups, selected.stage);
+    body = stageGroups.length
+      ? renderLeagueTableView(stageGroups, selected.stage?.rules || {}, viewType)
+      : emptyState('No hay tabla disponible.');
+  }
+  return `${selector}${body}`;
+}
+
+async function renderGroupTablesMode(ctx) {
+  const groups = await fetchStandingsGroups(ctx.options);
+  const stage = stageDefinitionsByViewType('GROUP_TABLES')[0];
+  const layoutStageDef = stage ? layoutStage(stage.key) : null;
+  const stageGroups = groupsForStage(groups, layoutStageDef);
+  setStatus('Torneo', `${stageGroups.length} grupos`);
+  return renderGroupTablesView(stageGroups, layoutStageDef ? (layoutStageDef.rules || {}) : null) || emptyState('No hay grupos disponibles.');
+}
+
+async function renderLeaguePhaseMode(ctx) {
+  return renderLeagueTableMode({ ...ctx, viewType: 'LEAGUE_PHASE_TABLE' });
+}
+
+// Generic fallback: a table if standings exist, otherwise the match list.
+async function renderGenericTable(ctx) {
+  let groups = [];
+  try {
+    groups = await fetchStandingsGroups(ctx.options);
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+  }
+  const hasRows = groups.some((g) => (g.standings || []).length);
+  if (!hasRows) return renderMatchList(ctx);
+  return groups.length > 1 ? renderGroupTablesView(groups) : renderLeagueTableView(groups);
+}
+
+// ─── Match list / "Fechas" (F3.4) ─────────────────────────────────────────────
+
+function matchdayOf(match) {
+  const md = match.matchday ?? match.round_number ?? match.metadata?.matchday ?? match.metadata?.round;
+  if (md !== null && md !== undefined && md !== '') {
+    const n = Number(md);
+    return Number.isFinite(n)
+      ? { key: `md-${n}`, label: `Fecha ${n}`, sort: n }
+      : { key: `md-${String(md)}`, label: String(md), sort: Number.MAX_SAFE_INTEGER - 1 };
+  }
+  const day = match.kickoff_at ? ymd(new Date(match.kickoff_at)) : 'sin-fecha';
+  return {
+    key: `day-${day}`,
+    label: match.kickoff_at
+      ? new Date(match.kickoff_at).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: CHILE_TIMEZONE })
+      : 'Sin fecha',
+    sort: match.kickoff_at ? new Date(match.kickoff_at).getTime() : Number.MAX_SAFE_INTEGER,
+  };
+}
+
+async function renderMatchList(ctx) {
+  const data = await cached('web/matches', {}, 90000, ctx.options);
+  let matches = data.matches || data.items || [];
+  const stageCode = ctx.stageCode;
+  if (stageCode) {
+    const filtered = matches.filter((m) => m.stage_code === stageCode || m.source_stage_code === stageCode);
+    if (filtered.length) matches = filtered;
+  }
+  if (!matches.length) return emptyState(`Sin partidos${ctx.stageTitle ? ` para ${ctx.stageTitle}` : ''}.`);
+
+  const days = new Map();
+  for (const match of matches) {
+    const md = matchdayOf(match);
+    if (!days.has(md.key)) days.set(md.key, { ...md, matches: [] });
+    days.get(md.key).matches.push(match);
+  }
+  const ordered = [...days.values()].sort((a, b) => a.sort - b.sort);
+  if (!state.matchday || !days.has(state.matchday)) {
+    const current = ordered.find((d) => d.matches.some((m) => !isFinishedStatus(m.status))) || ordered[ordered.length - 1];
+    state.matchday = current.key;
+  }
+  const index = ordered.findIndex((d) => d.key === state.matchday);
+  const active = ordered[index];
+  active.matches.sort((a, b) => (a.kickoff_at || '') < (b.kickoff_at || '') ? -1 : 1);
+  setStatus('Torneo', `${active.label} · ${active.matches.length} partidos`);
+  return `
+    <div class="matchday-pager">
+      <button type="button" data-matchday-step="-1" ${index > 0 ? '' : 'disabled'} aria-label="Fecha anterior">‹</button>
+      <label class="sr-only" for="matchday-select">Seleccionar fecha</label>
+      <select id="matchday-select" data-matchday-select>
+        ${ordered.map((d) => `<option value="${escapeHtml(d.key)}" ${d.key === active.key ? 'selected' : ''}>${escapeHtml(d.label)} (${d.matches.length})</option>`).join('')}
+      </select>
+      <button type="button" data-matchday-step="1" ${index < ordered.length - 1 ? '' : 'disabled'} aria-label="Fecha siguiente">›</button>
+    </div>
+    <section class="kickoff-block fade-in" data-matchday-keys="${escapeHtml(ordered.map((d) => d.key).join('|'))}">
+      <header class="kickoff-header"><span class="kickoff-time">${escapeHtml(active.label)}</span></header>
+      <div class="grid">${active.matches.map(matchCard).join('')}</div>
+    </section>`;
+}
+
+function attachMatchdayHandlers(rerender) {
+  const select = root.querySelector('[data-matchday-select]');
+  if (!select) return;
+  const keys = [...select.options].map((o) => o.value);
+  select.addEventListener('change', () => { state.matchday = select.value; rerender(); });
+  root.querySelectorAll('[data-matchday-step]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = keys[keys.indexOf(state.matchday) + Number(btn.dataset.matchdayStep)];
+      if (!next) return;
+      state.matchday = next;
+      rerender();
+    });
+  });
 }
 
 function qualificationStatusLabel(value) {
@@ -849,24 +1150,24 @@ function qualificationStatusLabel(value) {
 function standingsGlobalHtml(rows) {
   const tableRows = rows.map((row) => `
     <tr>
-      <td><strong>${row.global_position ?? '-'}</strong></td>
+      <td><strong>${row.global_position != null ? num(row.global_position) : '-'}</strong></td>
       <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name || '-')}</strong></td>
       <td>${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</td>
-      <td><strong>${row.points ?? 0}</strong></td>
-      <td>${row.played ?? 0}</td>
-      <td>${row.wins ?? 0}</td>
-      <td>${row.draws ?? 0}</td>
-      <td>${row.losses ?? 0}</td>
-      <td>${row.goals_for ?? 0}</td>
-      <td>${row.goals_against ?? 0}</td>
-      <td>${row.goal_difference ?? 0}</td>
+      <td><strong>${num(row.points)}</strong></td>
+      <td>${num(row.played)}</td>
+      <td>${num(row.wins)}</td>
+      <td>${num(row.draws)}</td>
+      <td>${num(row.losses)}</td>
+      <td>${num(row.goals_for)}</td>
+      <td>${num(row.goals_against)}</td>
+      <td>${num(row.goal_difference)}</td>
       <td><span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(row.status))}</span></td>
     </tr>`).join('');
 
   const cards = rows.map((row) => `
     <article class="card standings-global-card fade-in">
       <header>
-        <strong>#${row.global_position ?? '-'}</strong>
+        <strong>#${row.global_position != null ? num(row.global_position) : '-'}</strong>
         <span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(row.status))}</span>
       </header>
       <div class="team-head" style="margin:.35rem 0 .25rem">
@@ -877,10 +1178,10 @@ function standingsGlobalHtml(rows) {
         </div>
       </div>
       <div class="stats-line">
-        <div class="stat"><b>${row.points ?? 0}</b><span>PTS</span></div>
-        <div class="stat"><b>${row.played ?? 0}</b><span>J</span></div>
-        <div class="stat"><b>${row.goals_for ?? 0}</b><span>GF</span></div>
-        <div class="stat"><b>${row.goal_difference ?? 0}</b><span>DG</span></div>
+        <div class="stat"><b>${num(row.points)}</b><span>PTS</span></div>
+        <div class="stat"><b>${num(row.played)}</b><span>J</span></div>
+        <div class="stat"><b>${num(row.goals_for)}</b><span>GF</span></div>
+        <div class="stat"><b>${num(row.goal_difference)}</b><span>DG</span></div>
       </div>
     </article>`).join('');
 
@@ -898,6 +1199,21 @@ function standingsGlobalHtml(rows) {
 
 async function renderStandings(options = {}) {
   if (!options.silent) loading('Posiciones');
+  // Prefer the stage-appropriate table (league / league phase) when the layout defines one.
+  const tableType = ['LEAGUE_PHASE_TABLE', 'LEAGUE_TABLE'].find((vt) => stageDefinitionsByViewType(vt).length);
+  if (tableType) {
+    const html = await RENDERERS[tableType]({ options, viewType: tableType });
+    setStatus('Posiciones', stageDefinitionsByViewType(tableType)[0]?.title || 'Tabla');
+    root.innerHTML = `<div class="tournament-body" id="tournament-panel">${html}</div>`;
+    root.querySelectorAll('[data-table-stage]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (button.dataset.tableStage === state.tableStage) return;
+        state.tableStage = button.dataset.tableStage;
+        renderStandings({ localOnly: true });
+      });
+    });
+    return;
+  }
   const data = await cached(`competitions/${SEASON}/standings/global`, {}, 90000, options);
   const rows = data.teams || [];
   setStatus('Posiciones', `${rows.length} equipos`);
@@ -917,7 +1233,7 @@ function teamCatalogCard(team) {
             <p>${escapeHtml(groupLabel(team.group_name || team.group_code || team.stage_name || ''))}</p>
           </div>
         </div>
-        <strong class="points-pill">#${team.global_position || '-'} · ${team.points ?? 0} pts</strong>
+        <strong class="points-pill">#${team.global_position ? num(team.global_position) : '-'} · ${num(team.points)} pts</strong>
       </div>
       <div class="team-rating">ELO <b>${team.elo_rating != null ? Number(team.elo_rating).toFixed(0) : '-'}</b></div>
       <div class="stats-line">
@@ -1131,29 +1447,154 @@ function rosterStatsTable(roster) {
     </div>`;
 }
 
-async function renderKnockout(options = {}) {
-  if (!options.silent) loading('Eliminatorias');
-  await ensureLayout();
+// ─── Knockout: bracket rounds + two-legged ties (F3.3) ────────────────────────
+
+function teamKey(team) {
+  return String(team?.team_id || team?.id || team?.slug || team?.display_name || team?.slot_label || '');
+}
+
+function teamName(team) {
+  return team?.display_name || team?.slot_label || 'Por definir';
+}
+
+// Group matches of a stage into ties: by tie_id when present, otherwise by the
+// unordered pair of teams in the same stage. Single matches become 1-leg ties.
+function groupTies(matches) {
+  const ties = new Map();
+  for (const match of matches) {
+    const pair = [teamKey(match.home), teamKey(match.away)];
+    const key = match.tie_id
+      ? `tie-${match.tie_id}`
+      : (pair[0] && pair[1] ? `pair-${pair.sort().join('|')}` : `match-${match.match_id || match.id || ties.size}`);
+    if (!ties.has(key)) ties.set(key, { key, legs: [] });
+    ties.get(key).legs.push(match);
+  }
+  return [...ties.values()].map((tie) => {
+    tie.legs.sort((a, b) => (num(a.leg_number, 0) - num(b.leg_number, 0)) || ((a.kickoff_at || '') < (b.kickoff_at || '') ? -1 : 1));
+    const first = tie.legs[0];
+    // Team A = home side of leg 1.
+    tie.teamA = first.home;
+    tie.teamB = first.away;
+    tie.aggregate = tieAggregate(tie);
+    tie.winner = tieWinner(tie);
+    tie.penalties = tie.legs.map(matchPenalties).filter(Boolean).pop() || null;
+    tie.kickoff_at = first.kickoff_at;
+    return tie;
+  }).sort((a, b) => ((a.kickoff_at || '') < (b.kickoff_at || '') ? -1 : 1));
+}
+
+function tieAggregate(tie) {
+  const last = tie.legs[tie.legs.length - 1];
+  const aKey = teamKey(tie.teamA);
+  if (last?.aggregate && last.aggregate.home != null && last.aggregate.away != null) {
+    // aggregate is expressed from the perspective of that leg's home team.
+    const lastHomeIsA = teamKey(last.home) === aKey;
+    return lastHomeIsA
+      ? { a: num(last.aggregate.home), b: num(last.aggregate.away) }
+      : { a: num(last.aggregate.away), b: num(last.aggregate.home) };
+  }
+  let a = 0;
+  let b = 0;
+  let scored = 0;
+  for (const leg of tie.legs) {
+    if (leg.home_score == null || leg.away_score == null) continue;
+    scored += 1;
+    if (teamKey(leg.home) === aKey) { a += num(leg.home_score); b += num(leg.away_score); }
+    else { a += num(leg.away_score); b += num(leg.home_score); }
+  }
+  return scored ? { a, b } : null;
+}
+
+function tieWinner(tie) {
+  const winnerId = tie.legs.map((l) => l.tie_winner_team_id).find(Boolean)
+    || (tie.legs.length === 1 ? tie.legs[0].winner_team_id : null);
+  if (winnerId) {
+    if (String(tie.teamA?.team_id || tie.teamA?.id) === String(winnerId)) return tie.teamA;
+    if (String(tie.teamB?.team_id || tie.teamB?.id) === String(winnerId)) return tie.teamB;
+  }
+  const done = tie.legs.every((l) => isFinishedStatus(l.status));
+  if (!done || !tie.aggregate) return null;
+  if (tie.aggregate.a > tie.aggregate.b) return tie.teamA;
+  if (tie.aggregate.b > tie.aggregate.a) return tie.teamB;
+  return null;
+}
+
+function tieCard(tie) {
+  if (tie.legs.length === 1 && !tie.legs[0].leg_number) return knockoutCard(tie.legs[0]);
+  const legRow = (leg, i) => {
+    const hasScore = leg.home_score != null && leg.away_score != null;
+    const score = hasScore ? `${num(leg.home_score)}-${num(leg.away_score)}` : 'vs';
+    const legNo = num(leg.leg_number, i + 1) || i + 1;
+    const pen = matchPenalties(leg);
+    return `
+      <div class="tie-leg">
+        <span class="tie-leg-label">${legNo === 1 ? 'Ida' : legNo === 2 ? 'Vuelta' : `Partido ${legNo}`}</span>
+        <span>${escapeHtml(teamShortName(leg.home))} <b>${escapeHtml(score)}</b> ${escapeHtml(teamShortName(leg.away))}${pen ? ` <small>(pen ${pen.home}-${pen.away})</small>` : ''}</span>
+        <span>${escapeHtml(leg.kickoff_at ? dateLabel(leg.kickoff_at).toLowerCase() : 'Por definir')}</span>
+      </div>`;
+  };
+  const agg = tie.aggregate;
+  return `
+    <article class="card bracket-card tie-card fade-in">
+      <div class="bracket-team">${teamFlag(tie.teamA)} <strong>${escapeHtml(teamName(tie.teamA))}</strong></div>
+      <div class="bracket-team">${teamFlag(tie.teamB)} <strong>${escapeHtml(teamName(tie.teamB))}</strong></div>
+      <div class="tie-legs">${tie.legs.map(legRow).join('')}</div>
+      <div class="tie-aggregate">
+        <span>Global <strong>${agg ? `${agg.a}-${agg.b}` : '—'}</strong>${tie.penalties ? ` · Pen ${tie.penalties.home}-${tie.penalties.away}` : ''}</span>
+        ${tie.winner ? `<span class="tie-winner">Avanza: ${escapeHtml(teamName(tie.winner))}</span>` : ''}
+      </div>
+    </article>`;
+}
+
+function tieBracketNode(tie) {
+  if (tie.legs.length === 1) return bracketNodeCard(tie.legs[0]);
+  const agg = tie.aggregate;
+  const aWin = tie.winner && teamKey(tie.winner) === teamKey(tie.teamA);
+  const bWin = tie.winner && teamKey(tie.winner) === teamKey(tie.teamB);
+  const live = tie.legs.some((l) => isLiveStatus(l.status));
+  return `
+    <div class="bracket-node${live ? ' bracket-node--live' : ''}">
+      <div class="bracket-node-team${aWin ? ' bracket-node-team--winner' : ''}">
+        <span class="bracket-node-flag">${teamFlag(tie.teamA)}</span>
+        <span class="bracket-node-name">${escapeHtml(teamName(tie.teamA))}</span>
+        ${agg ? `<span class="bracket-node-score${aWin ? ' bracket-node-score--win' : ''}">${agg.a}</span>` : ''}
+      </div>
+      <div class="bracket-node-divider"></div>
+      <div class="bracket-node-team${bWin ? ' bracket-node-team--winner' : ''}">
+        <span class="bracket-node-flag">${teamFlag(tie.teamB)}</span>
+        <span class="bracket-node-name">${escapeHtml(teamName(tie.teamB))}</span>
+        ${agg ? `<span class="bracket-node-score${bWin ? ' bracket-node-score--win' : ''}">${agg.b}</span>` : ''}
+      </div>
+      <div class="bracket-node-agg">Global${tie.penalties ? ` · pen ${tie.penalties.home}-${tie.penalties.away}` : ''}</div>
+    </div>`;
+}
+
+function isTwoLegStage(stage, matches) {
+  return stage.viewType === 'TWO_LEG_TIE' || stage.legs > 1 || matches.some((m) => m.tie_id || m.leg_number);
+}
+
+async function renderBracketMode(ctx) {
   const stages = knockoutStageDefinitions();
-  const data = await cached('web/knockout', {}, 90000, options);
+  if (!stages.length) return renderMatchList(ctx);
+  const data = await cached('web/knockout', {}, 90000, ctx.options);
   const matches = data.matches || [];
-  setStatus('Eliminatorias', `${matches.length} partidos`);
+  setStatus('Torneo', `${matches.length} partidos`);
   const byStage = matches.reduce((acc, match) => {
     const key = knockoutStageKey(match);
     (acc[key] ||= []).push(match);
     return acc;
   }, {});
-  // Init or re-anchor knockoutStage to a stage that has data
-  if (!state.knockoutStage || !byStage[state.knockoutStage]) {
-    state.knockoutStage = stages.find((s) => byStage[s.key]?.length)?.key || stages[0]?.key || null;
+  if (!state.knockoutStage || !stages.some((s) => s.key === state.knockoutStage)) {
+    state.knockoutStage = stages.find((s) => byStage[s.key]?.length)?.key || stages[0].key;
   }
   const active = stages.find((stage) => stage.key === state.knockoutStage) || stages[0];
   const activeMatches = byStage[active.key] || [];
-  const activeIndex = stages.findIndex((s) => s.key === state.knockoutStage);
+  const activeIndex = stages.findIndex((s) => s.key === active.key);
   const hasPrev = activeIndex > 0;
   const hasNext = activeIndex < stages.length - 1;
+  const countFor = (stage) => num((byStage[stage.key] || []).length || stage.count);
 
-  root.innerHTML = `
+  return `
     <div class="knockout-view fade-in">
       <div class="bracket-tree-wrap">
         ${renderBracketTree(byStage, stages)}
@@ -1162,78 +1603,55 @@ async function renderKnockout(options = {}) {
         <div class="knockout-stage-header">
           <button class="knockout-nav-btn${hasPrev ? '' : ' disabled'}" data-dir="-1" ${hasPrev ? '' : 'disabled'} aria-label="Etapa anterior">‹</button>
           <div class="knockout-stage-info">
-            <h2 class="knockout-stage-title">${escapeHtml(active.title.toUpperCase())}</h2>
-            <span class="knockout-stage-count">${(byStage[active.key] || []).length || active.count} partidos</span>
+            <h2 class="knockout-stage-title">${escapeHtml(String(active.title).toUpperCase())}</h2>
+            <span class="knockout-stage-count">${countFor(active)} partidos</span>
           </div>
           <button class="knockout-nav-btn${hasNext ? '' : ' disabled'}" data-dir="1" ${hasNext ? '' : 'disabled'} aria-label="Etapa siguiente">›</button>
         </div>
-        <div class="knockout-progress" role="tablist" aria-label="Progreso eliminatorias">
-          ${stages.map((stage) => `
-            <button class="knockout-progress-step${stage.key === state.knockoutStage ? ' active' : ''}"
-                    data-knockout-stage="${stage.key}" role="tab"
-                    aria-selected="${stage.key === state.knockoutStage}"
-                    title="${escapeHtml(stage.title)}">
-              <span class="knockout-progress-dot"></span>
-              <span class="knockout-progress-label">${escapeHtml(stage.title)}</span>
-            </button>`).join('')}
-        </div>
         <div class="knockout-tabs" role="tablist" aria-label="Fases eliminatorias">
           ${stages.map((stage) => `
-            <button class="${stage.key === active.key ? 'active' : ''}" data-knockout-stage="${stage.key}" type="button" role="tab" aria-selected="${stage.key === active.key ? 'true' : 'false'}">
+            <button class="${stage.key === active.key ? 'active' : ''}" data-knockout-stage="${escapeHtml(stage.key)}" type="button" role="tab"
+                    aria-selected="${stage.key === active.key ? 'true' : 'false'}" aria-controls="knockout-panel">
               ${escapeHtml(stage.title)}
-              <span>${(byStage[stage.key] || []).length || stage.count}</span>
+              <span>${countFor(stage)}</span>
             </button>`).join('')}
         </div>
-        ${knockoutColumn(active, activeMatches)}
+        <div id="knockout-panel" role="tabpanel">${knockoutColumn(active, activeMatches)}</div>
       </div>
     </div>`;
-
-  root.querySelectorAll('[data-knockout-stage]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (button.dataset.knockoutStage === state.knockoutStage) return;
-      state.knockoutStage = button.dataset.knockoutStage;
-      renderKnockout({ localOnly: true });
-    });
-  });
-  root.querySelectorAll('[data-dir]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const nextStage = adjacentKnockoutStage(Number(btn.dataset.dir));
-      if (!nextStage) return;
-      state.knockoutStage = nextStage;
-      renderKnockout({ localOnly: true });
-    });
-  });
-  const view = root.querySelector('.knockout-view');
-  if (view) attachKnockoutSwipe(view);
 }
 
 function renderBracketTree(byStage, stages) {
   const rounds = stages.filter((s) => !['GROUP_STAGE', 'LEAGUE_PHASE'].includes(s.key));
   if (!rounds.length) return '';
-  const maxSlots = Math.max(...rounds.map((s) => s.count || 1), 1);
+  const slotsOf = (stage) => {
+    const stageMatches = byStage[stage.key] || [];
+    return isTwoLegStage(stage, stageMatches) ? groupTies(stageMatches) : stageMatches.map((m) => ({ legs: [m] }));
+  };
+  const maxSlots = Math.max(...rounds.map((s) => Math.max(num(s.slots || s.count), slotsOf(s).length, 1)), 1);
   const NODE_H = 64;
   const NODE_GAP = 6;
   const bracketH = maxSlots * (NODE_H + NODE_GAP);
   return `
     <div class="bracket-tree">
-      <div class="bracket-rounds" style="--bracket-height:${bracketH}px">
+      <div class="bracket-rounds" style="--bracket-height:${num(bracketH)}px">
         ${rounds.map((stage) => {
-          const stageMatches = byStage[stage.key] || [];
-          const total = Math.max(stage.count || stageMatches.length, 1);
-          const nodes = Array.from({ length: total }, (_, i) => stageMatches[i] || null);
+          const items = slotsOf(stage);
+          const total = Math.max(num(stage.slots || stage.count), items.length, 1);
+          const nodes = Array.from({ length: total }, (_, i) => items[i] || null);
           return `
             <div class="bracket-round">
               <div class="bracket-round-label">${escapeHtml(stage.title)}</div>
               <div class="bracket-round-slots">
-                ${nodes.map((match) => match ? bracketNodeCard(match) : `
+                ${nodes.map((item) => item ? tieBracketNode(item) : `
                   <div class="bracket-node bracket-node--placeholder">
                     <div class="bracket-node-team">
-                      <span class="placeholder-icon">◇</span>
+                      <span class="placeholder-icon" aria-hidden="true">◇</span>
                       <span class="bracket-node-name" style="color:var(--faint);font-style:italic">Por definir</span>
                     </div>
                     <div class="bracket-node-divider"></div>
                     <div class="bracket-node-team">
-                      <span class="placeholder-icon">◇</span>
+                      <span class="placeholder-icon" aria-hidden="true">◇</span>
                       <span class="bracket-node-name" style="color:var(--faint);font-style:italic">Por definir</span>
                     </div>
                   </div>`).join('')}
@@ -1245,10 +1663,10 @@ function renderBracketTree(byStage, stages) {
 }
 
 function bracketNodeCard(match) {
-  const isLive = ['IN_PROGRESS', 'IN_PLAY', 'LIVE', 'HT', 'PAUSED'].includes(match.status);
+  const isLive = isLiveStatus(match.status);
   const hasScore = match.home_score != null && match.away_score != null;
-  const homeWin = hasScore && match.home_score > match.away_score;
-  const awayWin = hasScore && match.away_score > match.home_score;
+  const homeWin = hasScore && num(match.home_score) > num(match.away_score);
+  const awayWin = hasScore && num(match.away_score) > num(match.home_score);
   const dateStr = match.kickoff_at ? dateLabel(match.kickoff_at).toLowerCase() : '';
   const timeStr = match.kickoff_at ? timeLabel(match.kickoff_at) : '';
   return `
@@ -1257,25 +1675,32 @@ function bracketNodeCard(match) {
       <div class="bracket-node-team${homeWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(match.home)}</span>
         <span class="bracket-node-name">${escapeHtml(match.home?.display_name || match.home?.slot_label || '?')}</span>
-        ${hasScore ? `<span class="bracket-node-score${homeWin ? ' bracket-node-score--win' : ''}">${match.home_score}</span>` : ''}
+        ${hasScore ? `<span class="bracket-node-score${homeWin ? ' bracket-node-score--win' : ''}">${num(match.home_score)}</span>` : ''}
       </div>
       <div class="bracket-node-divider"></div>
       <div class="bracket-node-team${awayWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(match.away)}</span>
         <span class="bracket-node-name">${escapeHtml(match.away?.display_name || match.away?.slot_label || '?')}</span>
-        ${hasScore ? `<span class="bracket-node-score${awayWin ? ' bracket-node-score--win' : ''}">${match.away_score}</span>` : ''}
+        ${hasScore ? `<span class="bracket-node-score${awayWin ? ' bracket-node-score--win' : ''}">${num(match.away_score)}</span>` : ''}
       </div>
     </div>`;
 }
 
 function knockoutColumn(stage, matches) {
-  const placeholderCount = Math.max(Number(stage.count || 0), 1);
-  const cards = matches.length
-    ? matches.map(knockoutCard).join('')
-    : Array.from({ length: placeholderCount }).map((_, index) => placeholderKnockoutCard(stage, index + 1)).join('');
+  const twoLeg = isTwoLegStage(stage, matches);
+  const slots = Math.max(num(twoLeg ? stage.slots : stage.count), 1);
+  let cards;
+  if (!matches.length) {
+    cards = Array.from({ length: slots }).map((_, index) => placeholderKnockoutCard(stage, index + 1)).join('');
+  } else if (twoLeg) {
+    cards = groupTies(matches).map(tieCard).join('');
+  } else {
+    cards = matches.map(knockoutCard).join('');
+  }
+  const label = twoLeg ? `${num(stage.slots) || groupTies(matches).length} llaves` : `${num(stage.count) || matches.length} partidos`;
   return `
     <section class="knockout-column">
-      <header><h2>${escapeHtml(stage.title)}</h2><span>${stage.count} partidos</span></header>
+      <header><h2>${escapeHtml(stage.title)}</h2><span>${escapeHtml(label)}</span></header>
       <div class="knockout-list">${cards}</div>
     </section>`;
 }
@@ -1287,7 +1712,7 @@ function adjacentKnockoutStage(direction) {
   return stages[next] || null;
 }
 
-function attachKnockoutSwipe(container) {
+function attachKnockoutSwipe(container, rerender) {
   let startX = 0;
   let startY = 0;
   let startedAt = 0;
@@ -1310,7 +1735,7 @@ function attachKnockoutSwipe(container) {
     if (!nextStage) return;
     state.knockoutStage = nextStage;
     container.classList.add(deltaX < 0 ? 'swipe-left' : 'swipe-right');
-    renderKnockout({ localOnly: true });
+    rerender();
   }, { passive: true });
 }
 
@@ -1321,19 +1746,19 @@ function knockoutCard(match) {
       <div class="bracket-team">${teamFlag(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong></div>
       <div class="bracket-vs">${matchScore(match)}</div>
       <div class="bracket-team">${teamFlag(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong></div>
-      <div class="venue compact">📍 ${escapeHtml(match.venue?.display_name || 'Sede por definir')}</div>
+      <div class="venue compact">${deco('📍')} ${escapeHtml(match.venue?.display_name || 'Sede por definir')}</div>
     </article>`;
 }
 
 function placeholderKnockoutCard(stage, index) {
-  const labels = [`Clasificado por definir`, `Clasificado por definir`];
+  const label = 'Clasificado por definir';
   return `
     <article class="card bracket-card placeholder">
-      <div class="bracket-top"><span>Partido ${index}</span><b>Por definir</b></div>
-      <div class="bracket-team"><span class="placeholder-icon">◇</span> <strong>${escapeHtml(labels[0])}</strong></div>
+      <div class="bracket-top"><span>${stage.legs > 1 ? 'Llave' : 'Partido'} ${num(index)}</span><b>Por definir</b></div>
+      <div class="bracket-team"><span class="placeholder-icon" aria-hidden="true">◇</span> <strong>${escapeHtml(label)}</strong></div>
       <div class="bracket-vs">vs</div>
-      <div class="bracket-team"><span class="placeholder-icon">◇</span> <strong>${escapeHtml(labels[1])}</strong></div>
-      <div class="venue compact">📍 Sede por confirmar</div>
+      <div class="bracket-team"><span class="placeholder-icon" aria-hidden="true">◇</span> <strong>${escapeHtml(label)}</strong></div>
+      <div class="venue compact">${deco('📍')} Sede por confirmar</div>
     </article>`;
 }
 
@@ -1341,8 +1766,9 @@ function tournamentTabsHtml(activeKey, views) {
   return `
     <div class="tournament-tabs knockout-tabs" role="tablist" aria-label="Secciones de torneo">
       ${views.map((view) => `
-        <button class="${view.key === activeKey ? 'active' : ''}" data-tournament-view="${escapeHtml(view.key)}" type="button" role="tab" aria-selected="${view.key === activeKey ? 'true' : 'false'}">
-          ${escapeHtml(view.label)}
+        <button class="${view.key === activeKey ? 'active' : ''}" data-tournament-view="${escapeHtml(view.key)}" type="button" role="tab"
+                aria-selected="${view.key === activeKey ? 'true' : 'false'}" aria-controls="tournament-panel">
+          ${escapeHtml(view.label || view.key)}
         </button>`).join('')}
     </div>`;
 }
@@ -1395,54 +1821,67 @@ function qualificationSummaryHtml(data) {
     </section>`;
 }
 
+async function renderQualificationMode(ctx) {
+  try {
+    const data = await cached(`competitions/${SEASON}/qualification-picture`, {}, 90000, ctx.options);
+    setStatus('Torneo', 'Clasificados');
+    return qualificationSummaryHtml(data);
+  } catch (error) {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+    return renderGenericTable(ctx);
+  }
+}
+
+async function renderMatchListMode(ctx) {
+  const stage = stageDefinitionsByViewType('MATCH_LIST')[0];
+  return renderMatchList({ ...ctx, stageCode: ctx.stageCode || stage?.key, stageTitle: ctx.stageTitle || stage?.title });
+}
+
+// Registry keyed by tournament_views[].render_mode and stages[].view_type (F3.1).
+const RENDERERS = {
+  GROUP_TABLES: renderGroupTablesMode,
+  LEAGUE_TABLE: renderLeagueTableMode,
+  LEAGUE_PHASE_TABLE: renderLeaguePhaseMode,
+  MATCH_LIST: renderMatchListMode,
+  BRACKET: renderBracketMode,
+  BRACKET_ROUND: renderBracketMode,
+  TWO_LEG_TIE: renderBracketMode,
+  QUALIFICATION_SUMMARY: renderQualificationMode,
+  GENERIC: renderGenericTable,
+};
+
+function resolveRenderer(view) {
+  const mode = String(view?.render_mode || view?.view_type || '').toUpperCase();
+  if (RENDERERS[mode]) return RENDERERS[mode];
+  // Legacy keys without a render_mode.
+  const byKey = { groups: 'GROUP_TABLES', table: 'LEAGUE_TABLE', fixtures: 'MATCH_LIST', knockout: 'BRACKET', qualified: 'QUALIFICATION_SUMMARY' }[view?.key];
+  return RENDERERS[byKey] || renderGenericTable;
+}
+
 async function renderTournament(options = {}) {
   if (!options.silent) loading('Torneo');
   await ensureLayout();
 
   const views = tournamentViewDefinitions();
-  if (!views.length) {
-    setStatus('Torneo', 'Sin secciones');
-    root.innerHTML = emptyState('Esta competencia no define vista de torneo.');
-    return;
-  }
-
   if (!state.tournamentView || !views.some((view) => view.key === state.tournamentView)) {
-    state.tournamentView = views[0].key;
+    state.tournamentView = views[0]?.key || null;
   }
-
-  const selected = views.find((view) => view.key === state.tournamentView) || views[0];
-  let bodyHtml = '';
-
-  if (selected.key === 'groups' || selected.render_mode === 'GROUP_TABLES') {
-    const data = await cached('web/standings', {}, 90000, options);
-    const groups = data.groups || [];
-    setStatus('Torneo', `${groups.length} grupos`);
-    bodyHtml = renderGroupTablesView(groups) || emptyState('No hay grupos disponibles.');
-  } else if (selected.key === 'knockout' || selected.render_mode === 'BRACKET') {
-    await renderKnockout({ ...options, silent: true });
-    setStatus('Torneo', 'Eliminatoria');
-    bodyHtml = root.innerHTML;
-  } else if (selected.key === 'qualified' || selected.render_mode === 'QUALIFICATION_SUMMARY') {
-    const data = await cached(`competitions/${SEASON}/qualification-picture`, {}, 90000, options);
-    setStatus('Torneo', 'Clasificados');
-    bodyHtml = qualificationSummaryHtml(data);
-  } else if (selected.render_mode === 'LEAGUE_TABLE') {
-    const data = await cached('web/standings', {}, 90000, options);
-    const groups = data.groups || [];
-    const stageRules = state.layout?.stages?.find((s) => String(s.view_type || '').toUpperCase() === 'LEAGUE_TABLE')?.rules || {};
-    bodyHtml = renderLeagueTableView(groups, stageRules);
-    setStatus('Torneo', selected.label || 'Tabla');
-  } else {
-    bodyHtml = emptyState(`Vista no soportada: ${selected.render_mode || selected.key}`);
-    setStatus('Torneo', selected.label || 'Torneo');
-  }
+  const selected = views.find((view) => view.key === state.tournamentView) || { key: 'generic', label: 'Tabla', render_mode: 'GENERIC' };
+  setStatus('Torneo', selected.label || 'Torneo');
+  const renderer = resolveRenderer(selected);
+  const bodyHtml = await renderer({ options, view: selected, viewType: selected.render_mode });
+  const notice = state.layout?._fallback
+    ? '<p class="layout-notice">Formato no disponible: se muestra una vista genérica.</p>'
+    : '';
 
   root.innerHTML = `
     <div class="fade-in tournament-view tournament-view--${escapeHtml(selected.key)}">
-      ${tournamentTabsHtml(selected.key, views)}
-      <div class="tournament-body">${bodyHtml}</div>
+      ${views.length > 1 ? tournamentTabsHtml(selected.key, views) : ''}
+      ${notice}
+      <div class="tournament-body" id="tournament-panel" role="tabpanel">${bodyHtml || emptyState('Sin datos para esta vista.')}</div>
     </div>`;
 
+  const rerender = () => renderTournament({ localOnly: true, silent: true });
   root.querySelectorAll('[data-tournament-view]').forEach((button) => {
     button.addEventListener('click', () => {
       const nextView = button.dataset.tournamentView;
@@ -1451,26 +1890,31 @@ async function renderTournament(options = {}) {
       renderTournament({ localOnly: true });
     });
   });
-
-  if (selected.key === 'knockout' || selected.render_mode === 'BRACKET') {
-    root.querySelectorAll('[data-knockout-stage]').forEach((button) => {
-      button.addEventListener('click', () => {
-        if (button.dataset.knockoutStage === state.knockoutStage) return;
-        state.knockoutStage = button.dataset.knockoutStage;
-        renderTournament({ localOnly: true });
-      });
+  root.querySelectorAll('[data-table-stage]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.dataset.tableStage === state.tableStage) return;
+      state.tableStage = button.dataset.tableStage;
+      rerender();
     });
-    root.querySelectorAll('[data-dir]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const nextStage = adjacentKnockoutStage(Number(btn.dataset.dir));
-        if (!nextStage) return;
-        state.knockoutStage = nextStage;
-        renderTournament({ localOnly: true });
-      });
+  });
+  root.querySelectorAll('[data-knockout-stage]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.dataset.knockoutStage === state.knockoutStage) return;
+      state.knockoutStage = button.dataset.knockoutStage;
+      rerender();
     });
-    const view = root.querySelector('.knockout-view');
-    if (view) attachKnockoutSwipe(view);
-  }
+  });
+  root.querySelectorAll('[data-dir]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const nextStage = adjacentKnockoutStage(Number(btn.dataset.dir));
+      if (!nextStage) return;
+      state.knockoutStage = nextStage;
+      rerender();
+    });
+  });
+  attachMatchdayHandlers(rerender);
+  const view = root.querySelector('.knockout-view');
+  if (view) attachKnockoutSwipe(view, rerender);
 }
 
 function eloBadge(rank) {
@@ -2268,12 +2712,12 @@ async function renderStats(options = {}) {
 function newsArticleCard(article) {
   const title = escapeHtml(article.title || '');
   const source = escapeHtml(article.source || '');
-  const url = article.url || '#';
-  const pub = article.published_at ? timeLabel(article.published_at) : '';
+  const url = safeUrl(article.url);
+  const pub = article.published_at ? escapeHtml(timeLabel(article.published_at)) : '';
   const team = article.home_team || article.away_team
     ? `<span class="news-team-tag">${escapeHtml(article.home_team || article.away_team)}</span>`
     : '';
-  return `<a class="news-article" href="${url}" target="_blank" rel="noopener noreferrer">
+  return `<a class="news-article" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">
     <div class="news-article__header">${team}<span class="news-article__meta">${source}${pub ? ` · ${pub}` : ''}</span></div>
     <span class="news-article__title">${title}</span>
     <span class="news-article__link">Leer más →</span>
@@ -2285,7 +2729,7 @@ async function renderNews(options = {}) {
 
   let matches = [];
   try {
-    const resp = await apiGet('web/news', {}, options.signal);
+    const resp = await apiGet('web/news', {}, options);
     matches = resp?.matches_news || [];
   } catch (e) {
     if (e.name === 'AbortError') return;
@@ -2308,7 +2752,7 @@ async function renderNews(options = {}) {
       <div class="news-match-header">
         <span class="news-match-teams">${escapeHtml(m.home_team)} <span class="news-vs">vs</span> ${escapeHtml(m.away_team)}</span>
         <div class="news-match-meta">
-          <span class="chip chip--muted">${timeLabel(m.kickoff_at)}</span>
+          <span class="chip chip--muted">${escapeHtml(timeLabel(m.kickoff_at))}</span>
           ${aiChip}
         </div>
       </div>
@@ -2356,8 +2800,36 @@ document.querySelectorAll('.tab').forEach((button) => {
     if (button.hidden) return;
     if (state.view === button.dataset.view) return;
     state.view = button.dataset.view;
+    root.setAttribute('aria-labelledby', button.id || '');
     updateTabs();
     render();
+  });
+});
+
+// Arrow-key / Home / End navigation for every role="tablist" (main tabs and subtabs).
+document.addEventListener('keydown', (event) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tab = event.target.closest?.('[role="tab"]');
+  const list = tab?.closest('[role="tablist"]');
+  if (!list) return;
+  const tabs = [...list.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden && !t.disabled);
+  const index = tabs.indexOf(tab);
+  if (index < 0) return;
+  let next = index;
+  if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+  else if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = tabs.length - 1;
+  event.preventDefault();
+  const target = tabs[next];
+  const selector = target.id ? `#${CSS.escape(target.id)}` : null;
+  target.click();
+  // Subtabs are re-rendered on click: restore focus on the equivalent tab.
+  requestAnimationFrame(() => {
+    const again = (selector && document.querySelector(selector))
+      || [...document.querySelectorAll('[role="tab"][aria-selected="true"]')].find((t) => t.textContent.trim() === target.textContent.trim())
+      || target;
+    again.focus();
   });
 });
 
@@ -2371,21 +2843,49 @@ function refreshSilently() {
   if (document.hidden) return;
   if (!state.layout) return;
   const quantPaths = { ev: 'ev/opportunities', model: 'model/diagnostics', stats: 'calibration/summary' };
-  const path = quantPaths[state.view]
-    || (state.view === 'standings' ? `competitions/${SEASON}/standings/global`
-    : state.view === 'teams' ? `competitions/${SEASON}/teams`
-    : state.view === 'tournament' || state.view === 'knockout' ? 'web/knockout'
-    : state.view === 'elo' ? `competitions/${SEASON}/elo`
-    : 'web/matches-overview');
-  invalidateViewCache(path);
+  const paths = quantPaths[state.view]
+    ? [quantPaths[state.view]]
+    : state.view === 'standings' ? [`competitions/${SEASON}/standings/global`, 'web/standings']
+    : state.view === 'teams' ? [`competitions/${SEASON}/teams`]
+    : state.view === 'tournament' || state.view === 'knockout' ? ['web/knockout', 'web/standings', 'web/matches']
+    : state.view === 'elo' ? [`competitions/${SEASON}/elo`]
+    : ['web/matches-overview'];
+  paths.forEach(invalidateViewCache);
   render({ silent: true });
 }
 
-if (AUTO_REFRESH_MS > 0) {
-  state.refreshTimer = window.setInterval(refreshSilently, AUTO_REFRESH_MS);
+// Auto-refresh: AUTO_REFRESH_MS while there are live matches, ≥60 s otherwise,
+// and fully paused while the tab is hidden (F3.10).
+function refreshIntervalMs() {
+  return state.hasLive ? AUTO_REFRESH_MS : Math.max(60000, AUTO_REFRESH_MS);
 }
 
+function scheduleRefresh() {
+  if (state.refreshTimer) clearTimeout(state.refreshTimer);
+  state.refreshTimer = null;
+  if (AUTO_REFRESH_MS <= 0 || document.hidden) return;
+  state.refreshTimer = window.setTimeout(() => {
+    refreshSilently();
+    scheduleRefresh();
+  }, refreshIntervalMs());
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+    return;
+  }
+  const stale = !state.lastUpdatedAt || Date.now() - state.lastUpdatedAt.getTime() > refreshIntervalMs();
+  if (stale) refreshSilently();
+  scheduleRefresh();
+});
+
+scheduleRefresh();
+
 // ── League picker ─────────────────────────────────────────────────────────────
+// Built dynamically from GET competitions/catalog (F3.7). The static groups,
+// icons and catalog below are used ONLY when that request fails.
 
 const COMPETITION_GROUPS = [
   {
@@ -2460,79 +2960,101 @@ const STATIC_CATALOG_FALLBACK = {
   'libertadores-2026':           { competition_season_slug: 'libertadores-2026',           name: 'Copa Libertadores',               season_label: '2026',        region: 'South America' },
 };
 
+const COMPETITION_TYPE_LABELS = {
+  WORLD_CUP: 'Mundiales',
+  INTERNATIONAL_TOURNAMENT: 'Torneos internacionales',
+  QUALIFIERS: 'Eliminatorias',
+  QUALIFIER: 'Eliminatorias',
+  CONTINENTAL_CLUB: 'Copas internacionales',
+  CLUB_INTERNATIONAL: 'Copas internacionales',
+  CONTINENTAL_CUP: 'Copas internacionales',
+  LEAGUE: 'Ligas',
+  DOMESTIC_LEAGUE: 'Ligas',
+  CUP: 'Copas',
+  DOMESTIC_CUP: 'Copas',
+};
+
+function catalogSlug(entry) {
+  return String(entry?.competition_season_slug || entry?.slug || '');
+}
+
+function catalogName(entry) {
+  return entry?.display_name || entry?.name || catalogSlug(entry);
+}
+
+function catalogTypeLabel(type) {
+  const raw = String(type || '').toUpperCase();
+  if (!raw) return 'Otras';
+  return COMPETITION_TYPE_LABELS[raw] || (raw.charAt(0) + raw.slice(1).toLowerCase()).replace(/_/g, ' ');
+}
+
+// Returns { source: 'api' | 'static', entries: [...] }.
 async function loadCompetitionCatalog() {
   if (_catalogCache) return _catalogCache;
-  // Use static fallback immediately; merge with API data if available
-  _catalogCache = { ...STATIC_CATALOG_FALLBACK };
   try {
     const data = await apiGet('competitions/catalog');
-    const apiEntries = (data?.competitions || data || []).reduce((acc, c) => {
-      acc[c.competition_season_slug] = c;
-      return acc;
-    }, {});
-    // Merge: API data wins over static fallback
-    _catalogCache = { ...STATIC_CATALOG_FALLBACK, ...apiEntries };
+    const list = Array.isArray(data) ? data : (data?.competitions || data?.items || []);
+    const entries = list.filter((c) => c && catalogSlug(c));
+    if (!entries.length) throw new Error('Catálogo vacío');
+    _catalogCache = { source: 'api', entries };
   } catch {
-    // Keep static fallback — picker still works offline
+    // Keep static fallback — picker still works offline. Not cached so it retries next open.
+    return { source: 'static', entries: Object.values(STATIC_CATALOG_FALLBACK) };
   }
   return _catalogCache;
 }
 
-function buildLeaguePickerDropdown(catalog) {
-  const groups = COMPETITION_GROUPS
-    .map((group) => {
-      const items = group.slugs
-        .map((slug) => catalog[slug])
-        .filter(Boolean)
-        .map((comp) => {
-          const isActive = comp.competition_season_slug === SEASON;
-          const icon = COMPETITION_ICONS[comp.competition_season_slug] || group.icon;
-          return `
-            <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
-                    data-season="${escapeHtml(comp.competition_season_slug)}"
-                    role="option" aria-selected="${isActive}">
-              <span class="league-picker-item-icon">${icon}</span>
-              <span class="league-picker-item-info">
-                <span class="league-picker-item-name">${escapeHtml(comp.name)}</span>
-                <span class="league-picker-item-meta">${escapeHtml(comp.season_label)} · ${escapeHtml(comp.region || '')}</span>
-              </span>
-            </button>`;
-        });
-      if (!items.length) return '';
-      return `
-        <div class="league-picker-group">
-          <div class="league-picker-group-label">${group.icon} ${escapeHtml(group.label)}</div>
-          ${items.join('')}
-        </div>`;
-    })
-    .filter(Boolean);
+function leaguePickerItem(comp, icon) {
+  const slug = catalogSlug(comp);
+  const isActive = slug === SEASON;
+  const meta = [comp.season_label, comp.region].filter(Boolean).join(' · ');
+  return `
+    <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
+            data-season="${escapeHtml(slug)}" type="button"
+            role="option" aria-selected="${isActive ? 'true' : 'false'}">
+      <span class="league-picker-item-icon" aria-hidden="true">${escapeHtml(icon || '🏆')}</span>
+      <span class="league-picker-item-info">
+        <span class="league-picker-item-name">${escapeHtml(catalogName(comp))}</span>
+        <span class="league-picker-item-meta">${escapeHtml(meta)}</span>
+      </span>
+    </button>`;
+}
 
-  // Add any catalog entry not in our group list as "Otras"
-  const knownSlugs = new Set(COMPETITION_GROUPS.flatMap((g) => g.slugs));
-  const others = Object.values(catalog)
-    .filter((c) => !knownSlugs.has(c.competition_season_slug))
-    .map((comp) => {
-      const isActive = comp.competition_season_slug === SEASON;
-      return `
-        <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
-                data-season="${escapeHtml(comp.competition_season_slug)}"
-                role="option" aria-selected="${isActive}">
-          <span class="league-picker-item-icon">🏟</span>
-          <span class="league-picker-item-info">
-            <span class="league-picker-item-name">${escapeHtml(comp.name)}</span>
-            <span class="league-picker-item-meta">${escapeHtml(comp.season_label)}</span>
-          </span>
-        </button>`;
-    });
-  if (others.length) {
-    groups.push(`<div class="league-picker-separator"></div>
-      <div class="league-picker-group">
-        <div class="league-picker-group-label">🏟 Otras</div>
-        ${others.join('')}
-      </div>`);
+function leaguePickerGroup(label, icon, items) {
+  if (!items.length) return '';
+  return `
+    <div class="league-picker-group" role="group" aria-label="${escapeHtml(label)}">
+      <div class="league-picker-group-label">${icon ? `${deco(icon)} ` : ''}${escapeHtml(label)}</div>
+      ${items.join('')}
+    </div>`;
+}
+
+function buildLeaguePickerDropdown(catalog) {
+  if (catalog.source === 'api') {
+    // Group by competition_type, then order by region/name. Icons come from the catalog.
+    const groups = new Map();
+    for (const comp of catalog.entries) {
+      const label = catalogTypeLabel(comp.competition_type || comp.domain_type);
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(comp);
+    }
+    return [...groups.entries()].map(([label, comps]) => {
+      comps.sort((a, b) => String(a.region || '').localeCompare(String(b.region || '')) || catalogName(a).localeCompare(catalogName(b)));
+      return leaguePickerGroup(label, '', comps.map((comp) => leaguePickerItem(comp, comp.ui?.icon || '🏆')));
+    }).join('');
   }
 
-  return groups.join('');
+  // Static fallback (API unreachable).
+  const bySlug = Object.fromEntries(catalog.entries.map((c) => [catalogSlug(c), c]));
+  const knownSlugs = new Set(COMPETITION_GROUPS.flatMap((g) => g.slugs));
+  const html = COMPETITION_GROUPS.map((group) => leaguePickerGroup(
+    group.label,
+    group.icon,
+    group.slugs.map((slug) => bySlug[slug]).filter(Boolean).map((comp) => leaguePickerItem(comp, COMPETITION_ICONS[catalogSlug(comp)] || group.icon)),
+  ));
+  const others = catalog.entries.filter((c) => !knownSlugs.has(catalogSlug(c))).map((comp) => leaguePickerItem(comp, '🏆'));
+  html.push(leaguePickerGroup('Otras', '🏆', others));
+  return html.filter(Boolean).join('');
 }
 
 function switchSeason(slug) {
