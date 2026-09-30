@@ -1995,6 +1995,7 @@ function adaptEVOpportunity(raw) {
     }
   }
   const lambda = explanation?.lambda_components || null;
+  const aiAdj = explanation?.ai_adjustment || null;
   const homeLambda = lambda?.home_lambda != null ? Number(lambda.home_lambda) : null;
   const awayLambda = lambda?.away_lambda != null ? Number(lambda.away_lambda) : null;
 
@@ -2022,7 +2023,23 @@ function adaptEVOpportunity(raw) {
     awayLambda,
     over25Prob: probOver25(homeLambda, awayLambda),
     bttsYesProb: probBttsYes(homeLambda, awayLambda),
+    aiMode: aiAdj?.policy?.mode || null,
+    aiFactors: Array.isArray(aiAdj?.factors) ? aiAdj.factors.slice(0, 4) : [],
+    aiKeyFactors: Array.isArray(aiAdj?.key_factors) ? aiAdj.key_factors.slice(0, 3) : [],
   };
+}
+
+function aiFactorsBlock(opp) {
+  if (!opp.aiFactors.length && !opp.aiKeyFactors.length) return '';
+  const mode = opp.aiMode ? ` (${aiModeLabel(opp.aiMode)})` : '';
+  const items = opp.aiFactors.length
+    ? opp.aiFactors.map((f) => `<li><span class="chip chip--muted">${escapeHtml(f.category || 'other')}</span> ${escapeHtml(f.description || '')}${f.impact_pp != null && Number(f.impact_pp) !== 0 ? ` <b>${Number(f.impact_pp) > 0 ? '+' : ''}${escapeHtml(Number(f.impact_pp).toFixed(1))}pp</b>` : ''}</li>`).join('')
+    : opp.aiKeyFactors.map((k) => `<li>${escapeHtml(k)}</li>`).join('');
+  return `<details class="ev-ai-factors"><summary>Factores IA${escapeHtml(mode)}</summary><ul style="margin:.3rem 0 0;padding-left:1rem;font-size:.72rem">${items}</ul></details>`;
+}
+
+function aiModeLabel(mode) {
+  return { ACTIVE: 'activa', SHADOW: 'sombra', OFF: 'apagada' }[mode] || String(mode || '—');
 }
 
 function adaptBlockedDecision(raw) {
@@ -2202,6 +2219,7 @@ function evOpportunityRow(opp) {
         <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
         <div class="ev-match-date">${escapeHtml(kickoff)}</div>
         ${lambdaBlock ? `<div class="ev-match-insights">${escapeHtml(lambdaBlock)}</div>` : ''}
+        ${aiFactorsBlock(opp)}
       </td>
       <td class="ev-td-market">${escapeHtml(opp.marketCode || '—')}</td>
       <td class="ev-td-sel"><b>${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</b></td>
@@ -2703,11 +2721,50 @@ function statsRoadmapEmpty() {
     </div>`;
 }
 
+function aiStageBrier(policy, stage) {
+  const sm = policy?.stage_metrics || {};
+  const m = sm[`${stage}_90d`] || sm[`${stage}_30d`];
+  return m && m.brier_score != null ? Number(m.brier_score) : null;
+}
+
+function aiLeagueCards(policies, track) {
+  if (!policies.length) return quantEmptyState('🤖', 'Sin política de IA', 'Se crea con el job ai_policy_update.');
+  const trackBy = new Map(track.map((t) => [t.competition, t]));
+  const fmtB = (v) => (v != null && !isNaN(v) ? Number(v).toFixed(4) : '—');
+  return `<div class="ai-league-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem">${policies.map((p) => {
+    const t = trackBy.get(p.competition) || {};
+    const recent = Array.isArray(t.largest_recent) ? t.largest_recent : [];
+    const reason = typeof p.reason === 'string' ? p.reason : '';
+    const rows = recent.map((r) => {
+      const adj = r.adjustment_pp || {};
+      return `<li>${escapeHtml(r.home_team || '?')} ${escapeHtml(r.score || '')} ${escapeHtml(r.away_team || '?')}
+        <span style="color:var(--muted)">H${escapeHtml(Number(adj.HOME || 0).toFixed(1))} D${escapeHtml(Number(adj.DRAW || 0).toFixed(1))} A${escapeHtml(Number(adj.AWAY || 0).toFixed(1))}pp</span>
+        <span class="chip ${r.helped ? '' : 'chip--muted'}">${r.helped ? 'ayudó' : 'empeoró'}</span></li>`;
+    }).join('');
+    return `
+      <article class="card" style="padding:.8rem">
+        <header style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">
+          <strong>${escapeHtml(p.competition_name || p.competition || '')}</strong>
+          <span class="chip">${escapeHtml(aiModeLabel(p.mode))}</span>
+        </header>
+        <div style="font-size:.75rem;margin:.4rem 0;display:grid;grid-template-columns:1fr 1fr;gap:.2rem .6rem">
+          <span>alpha</span><b>${escapeHtml(Number(p.alpha || 0).toFixed(2))}</b>
+          <span>n settled IA</span><b>${escapeHtml(String(p.n_settled ?? 0))}</b>
+          <span>Brier modelo (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'raw')))}</b>
+          <span>Brier IA (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'ai')))}</b>
+          <span>Brier calibrado (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'calibrated')))}</b>
+        </div>
+        ${reason ? `<div style="font-size:.7rem;color:var(--muted)">${escapeHtml(reason)}</div>` : ''}
+        ${rows ? `<ul style="margin:.4rem 0 0;padding-left:1rem;font-size:.72rem">${rows}</ul>` : '<div style="font-size:.72rem;color:var(--muted)">Sin ajustes IA liquidados aún.</div>'}
+      </article>`;
+  }).join('')}</div>`;
+}
+
 async function renderStats(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando Stats</span><i></i></div></div>`;
   }
-  let calibration = [], buckets = [], decisions = [], history = [];
+  let calibration = [], buckets = [], decisions = [], history = [], aiPolicies = [], aiTrack = [];
   try {
     const [calData, roiData, bankData] = await Promise.all([
       cached('calibration/summary', { limit: 5 }, 120000, options),
@@ -2726,14 +2783,22 @@ async function renderStats(options = {}) {
   try {
     const histData = await cached('model/metrics/history', { days: 30 }, 300000, options);
     history = Array.isArray(histData?.series) ? histData.series : [];
+    aiPolicies = Array.isArray(histData?.ai_policy) ? histData.ai_policy : [];
   } catch (error) {
     if (error.name === 'AbortError') return;
     history = [];
   }
+  try {
+    const trackData = await cached('model/ai-track-record', { days: 90, limit: 5 }, 300000, options);
+    aiTrack = Array.isArray(trackData?.competitions) ? trackData.competitions : [];
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    aiTrack = [];
+  }
 
   setStatus('Stats', `${decisions.length} picks`);
 
-  const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0;
+  const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0 || aiPolicies.length > 0;
 
   root.innerHTML = `
     <div class="stats-view">
@@ -2741,6 +2806,10 @@ async function renderStats(options = {}) {
       <section class="stats-section">
         <h3>KPIs del Modelo</h3>
         ${statsKpiBar(calibration, buckets)}
+      </section>
+      <section class="stats-section">
+        <h3>IA por liga (modelo vs IA vs calibrado)</h3>
+        ${aiLeagueCards(aiPolicies, aiTrack)}
       </section>
       <section class="stats-section">
         <h3>Evolución diaria (30 días)</h3>
