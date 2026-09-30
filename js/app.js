@@ -1430,21 +1430,25 @@ function rosterStatsTable(roster) {
   return `
     <div class="table-card modal-table">
       <table>
-        <thead><tr><th>POS</th><th>Jugador</th><th>J</th><th>Min</th><th>G</th><th>A</th><th>TA</th><th>TR</th><th>Rating</th></tr></thead>
-        <tbody>${roster.map((player) => {
+        <thead><tr><th>POS</th><th>Jugador</th><th title="Partidos jugados">J</th><th>Min</th><th title="Goles">G</th><th title="Asistencias">A</th><th title="Tiros al arco">TA arco</th><th title="Pases clave">PC</th><th title="Precisión de pase">Pase %</th><th title="Tarjetas amarillas">TA</th><th title="Tarjetas rojas">TR</th><th>Rating</th></tr></thead>
+        <tbody>${[...roster].sort((a, b) => num((b.stats || {}).minutes) - num((a.stats || {}).minutes)).map((player) => {
           const stats = player.stats || {};
+          const optional = (value) => (value === null || value === undefined ? '-' : num(value));
           return `<tr>
             <td>${escapeHtml(player.position || 'UNK')}</td>
             <td><strong>${escapeHtml(player.display_name || '')}</strong></td>
-            <td>${stats.appearances || 0}</td>
-            <td>${stats.minutes || 0}</td>
-            <td>${stats.goals || 0}</td>
-            <td>${stats.assists || 0}</td>
-            <td>${stats.yellow_cards || 0}</td>
-            <td>${stats.red_cards || 0}</td>
-            <td>${stats.avg_rating ?? '-'}</td>
+            <td>${num(stats.appearances)}</td>
+            <td>${num(stats.minutes)}</td>
+            <td>${num(stats.goals)}</td>
+            <td>${num(stats.assists)}</td>
+            <td>${num(stats.shots_on)}</td>
+            <td>${num(stats.key_passes)}</td>
+            <td>${optional(stats.pass_accuracy)}</td>
+            <td>${num(stats.yellow_cards)}</td>
+            <td>${num(stats.red_cards)}</td>
+            <td>${optional(stats.avg_rating)}</td>
           </tr>`;
-        }).join('')}</tbody>
+        }).join('') || `<tr><td colspan="12">${escapeHtml('Sin estadísticas de jugadores para esta temporada.')}</td></tr>`}</tbody>
       </table>
     </div>`;
 }
