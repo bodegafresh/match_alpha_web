@@ -4037,6 +4037,10 @@ function adminCard(item) {
       <fieldset class="idq-choice"><legend>Fusionar en</legend>
         ${candidates.map((c, i) => `<label><input type="radio" name="idq-cand-${escapeHtml(item.id)}" value="${escapeHtml(c)}" ${i === 0 ? 'checked' : ''}> ${escapeHtml(c)}</label>`).join('')}
       </fieldset>` : '';
+  const etype = String(item.entity_type || '').toUpperCase();
+  const sameLabel = etype === 'VENUE' ? 'Mismo estadio' : etype === 'TEAM' ? 'Mismo equipo' : 'Misma persona';
+  const diffLabel = etype === 'VENUE' ? 'Distintos' : etype === 'TEAM' ? 'Distintos' : 'Distintas';
+  const canSplit = etype === 'PLAYER';
   return `
     <article class="idq-card" data-id="${escapeHtml(item.id)}">
       <header class="idq-head">
@@ -4051,8 +4055,8 @@ function adminCard(item) {
       ${ev.concurrent_teams ? '<p class="idq-warn">Clubes simultáneos</p>' : ''}
       ${choice}
       <div class="idq-actions">
-        <button type="button" class="idq-btn idq-btn--same" data-act="approve">Misma persona</button>
-        <button type="button" class="idq-btn idq-btn--diff" data-act="reject">Distintas</button>
+        <button type="button" class="idq-btn idq-btn--same" data-act="approve">${escapeHtml(sameLabel)}</button>
+        <button type="button" class="idq-btn idq-btn--diff" data-act="reject"${canSplit ? '' : ' disabled title="Separar solo está disponible para jugadores; corrige estadios/equipos con SQL o merge"'}>${escapeHtml(diffLabel)}</button>
         <button type="button" class="idq-btn idq-btn--skip" data-act="skip">Saltar</button>
       </div>
     </article>`;
@@ -4106,7 +4110,7 @@ async function decideIdentityItem(id, act) {
   // Optimistic: remove the card now, restore it if the call fails.
   adminState.items.splice(index, 1);
   if (act === 'skip') { adminState.items.push(item); adminState.msg = `Saltado: ${item.name || id}`; renderIdentityQueue(); return; }
-  adminState.msg = `${act === 'approve' ? 'Misma persona' : 'Distintas'}: ${item.name || id}…`;
+  adminState.msg = `${act === 'approve' ? 'Iguales' : 'Distintos'}: ${item.name || id}…`;
   renderIdentityQueue();
   const body = { actor: 'web-admin' };
   if (act === 'approve') {

@@ -1966,3 +1966,5 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .idq-btn--same { background: #1e8e4e; border-color: #1e8e4e; color: #fff; }
 .idq-btn--diff { background: #c0392b; border-color: #c0392b; color: #fff; }
 .idq-btn:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
+
+.idq-btn:disabled { opacity: .45; cursor: not-allowed; }
