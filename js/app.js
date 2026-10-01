@@ -229,13 +229,27 @@ function knockoutStageKey(match) {
   return match.stage_code || match.stage_name || stages[0]?.key || 'KNOCKOUT';
 }
 
+// Flags come from the backend (flag_emoji: 🏴 tag sequences for ENG/SCO/WAL, ISO flags otherwise).
+// flag_code is only used when it is an ISO alpha-2 (regional indicators); anything else → neutral icon.
+function flagFromCode(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return '';
+  return String.fromCodePoint(...[...c].map((ch) => 0x1F1E6 + ch.charCodeAt(0) - 65));
+}
+
+function neutralFlag() {
+  return '<span class="placeholder-icon flag-neutral" aria-hidden="true">⚽</span>';
+}
+
 function teamFlag(team) {
   if (team?.flag_asset) {
     const src = safeUrl(team.flag_asset);
     if (src !== '#') return `<img class="flag-img" src="${escapeHtml(src)}" alt="" loading="lazy">`;
   }
   if (team?.flag_emoji) return deco(team.flag_emoji);
-  return team?.is_placeholder ? '<span class="placeholder-icon" aria-hidden="true">◇</span>' : deco('🏳️');
+  const fromCode = flagFromCode(team?.flag_code || team?.country_code);
+  if (fromCode) return deco(fromCode);
+  return team?.is_placeholder ? '<span class="placeholder-icon" aria-hidden="true">◇</span>' : neutralFlag();
 }
 
 function layoutKeyToView(key) {
@@ -646,8 +660,8 @@ function matchTimeHtml(match) {
 }
 
 function matchCard(match) {
-  const home = match.home || { display_name: 'Por definir', flag_emoji: '🏳️' };
-  const away = match.away || { display_name: 'Por definir', flag_emoji: '🏳️' };
+  const home = match.home || { display_name: 'Por definir', is_placeholder: true };
+  const away = match.away || { display_name: 'Por definir', is_placeholder: true };
   const group = matchGroupLabel(match);
   const stage = matchStageLabel(match);
   const meta = [stage, group].filter(Boolean).join(' · ');
