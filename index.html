@@ -2,15 +2,20 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#060d17">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Match Alpha</title>
   <meta name="description" content="Dashboard deportivo multi-competencia: partidos, posiciones, equipos, torneo y métricas del modelo.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261001c">
+  <link rel="stylesheet" href="css/styles.css?v=20261001h">
 </head>
 <body>
   <header class="topbar">
@@ -38,6 +43,8 @@
     </nav>
   </header>
 
+  <div id="offline-banner" class="offline-banner" role="status" hidden>Sin conexión — mostrando último dato</div>
+
   <main class="shell">
     <section id="status-strip" class="status-strip">
       <span id="status-text"></span>
@@ -46,6 +53,23 @@
     <div id="date-filter-bar" hidden></div>
     <section id="view-root" class="view-root" role="tabpanel" aria-labelledby="tab-today"></section>
   </main>
+
+  <nav class="bottom-nav" aria-label="Navegación principal">
+    <button class="bottom-tab" data-view="today" type="button"><span class="bottom-tab-icon" aria-hidden="true">⚽</span><span>Partidos</span></button>
+    <button class="bottom-tab" data-view="standings" type="button"><span class="bottom-tab-icon" aria-hidden="true">☰</span><span>Tablas</span></button>
+    <button class="bottom-tab" data-view="teams" type="button"><span class="bottom-tab-icon" aria-hidden="true">⛨</span><span>Equipos</span></button>
+    <button class="bottom-tab" data-view="ev" type="button"><span class="bottom-tab-icon" aria-hidden="true">◎</span><span>Picks</span></button>
+    <button class="bottom-tab" data-more type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="more-sheet"><span class="bottom-tab-icon" aria-hidden="true">⋯</span><span>Más</span></button>
+  </nav>
+  <div class="sheet-backdrop" id="more-backdrop" hidden></div>
+  <div class="more-sheet" id="more-sheet" role="dialog" aria-label="Más secciones" hidden>
+    <span class="sheet-grabber" aria-hidden="true"></span>
+    <button class="more-item" data-view="tournament" type="button"><span aria-hidden="true">🏆</span>Torneo</button>
+    <button class="more-item" data-view="news" type="button"><span aria-hidden="true">📰</span>Noticias</button>
+    <button class="more-item" data-view="elo" type="button"><span aria-hidden="true">📈</span>ELO</button>
+    <button class="more-item" data-view="model" type="button"><span aria-hidden="true">🧠</span>Modelo</button>
+    <button class="more-item" data-view="stats" type="button"><span aria-hidden="true">📊</span>Stats</button>
+  </div>
 
   <template id="login-template">
     <form class="login-box" id="login-form">
@@ -58,9 +82,8 @@
     </form>
   </template>
 
-  <script src="js/config.js?v=20261001c"></script>
-  <!-- TODO: bundle Chart.js locally before SaaS launch (currently on CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/app.js?v=20261001c"></script>
+  <script src="js/config.js?v=20261001h"></script>
+  <!-- Chart.js is lazy-loaded by js/app.js (loadChartJs) only when the Stats view opens. -->
+  <script src="js/app.js?v=20261001h"></script>
 </body>
 </html>

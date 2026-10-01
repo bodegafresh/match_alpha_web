@@ -451,7 +451,9 @@ async function apiGet(path, params = {}, options = {}) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
   });
   const key = savedKey();
-  const headers = key ? { Authorization: `Bearer ${key}` } : {};
+  // Read key travels as X-API-Key (accepted by require_read_key); the service worker only
+  // caches requests WITHOUT an Authorization header, so internal Bearer keys are never cached.
+  const headers = key ? { 'X-API-Key': key } : {};
   // 30-second timeout so the page doesn't freeze when Render backend is waking up
   const { signal, cancel, timedOut } = requestSignal(options.signal, REQUEST_TIMEOUT_MS);
   let response;
@@ -467,6 +469,7 @@ async function apiGet(path, params = {}, options = {}) {
   } finally {
     cancel();
   }
+  setOfflineBanner(response.headers.get('x-ma-offline') === '1');
   const json = await response.json().catch(() => ({}));
   if (response.status === 401) {
     clearKey();
@@ -513,6 +516,18 @@ function updateTabs() {
     button.setAttribute('aria-selected', active ? 'true' : 'false');
     if (active && button.id) root.setAttribute('aria-labelledby', button.id);
   });
+  // Bottom nav / "Más" sheet mirror the top tabs (visibility comes from the layout).
+  const hiddenViews = new Set([...document.querySelectorAll('.tab')].filter((t) => t.hidden).map((t) => t.dataset.view));
+  let moreActive = false;
+  document.querySelectorAll('.bottom-tab[data-view], .more-item[data-view]').forEach((button) => {
+    const view = button.dataset.view;
+    button.hidden = hiddenViews.has(view);
+    const active = view === state.view;
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+    if (active && button.classList.contains('more-item')) moreActive = true;
+  });
+  document.querySelector('.bottom-tab[data-more]')?.classList.toggle('active', moreActive);
 }
 
 function renderLogin(message = '') {
@@ -557,7 +572,7 @@ function errorState(error) {
   root.innerHTML = `
     <div class="error" role="alert">
       <strong>${escapeHtml(title)}</strong>
-      <div>${escapeHtml(error?.message || error)}</div>
+      <div>${escapeHtml(/failed to fetch|networkerror|load failed/i.test(String(error?.message || '')) ? 'Sin conexión con el servidor. Revisa tu red e intenta de nuevo.' : (error?.message || error))}</div>
       <div class="error-actions"><button type="button" class="retry-btn" data-retry>Reintentar</button></div>
     </div>`;
   root.querySelector('[data-retry]')?.addEventListener('click', () => render());
@@ -667,7 +682,7 @@ function matchCard(match) {
   const meta = [stage, group].filter(Boolean).join(' · ');
   const isLive = isLiveStatus(match.status);
   return `
-    <article class="card match-card fade-in" data-status="${escapeHtml(match.status || 'SCHEDULED')}">
+    <article class="card match-card fade-in" data-status="${escapeHtml(match.status || 'SCHEDULED')}"${match.match_id ? ` data-match-id="${escapeHtml(match.match_id)}" tabindex="0" role="button" aria-label="${escapeHtml(`Ver detalle: ${home.display_name || ''} vs ${away.display_name || ''}`)}"` : ''}>
       <div class="match-meta">
         <span class="stage-chip${isLive ? ' stage-chip--live' : ''}">${escapeHtml(meta || 'Partido')}</span>
         <span class="match-time ${statusClass(match.status)}">${matchTimeHtml(match)}</span>
@@ -903,20 +918,36 @@ function zoneLegendHtml(zones) {
 function _standingsRow(row, index, zone = null) {
   const pos = num(row.position, index + 1) || index + 1;
   const posCls = pos <= 3 ? `standings-row--${pos === 1 ? '1st' : pos === 2 ? '2nd' : '3rd'}` : '';
-  const cls = [posCls, zone ? zoneClass(zone.code) : ''].filter(Boolean).join(' ');
+  const cls = ['standings-main', posCls, zone ? zoneClass(zone.code) : ''].filter(Boolean).join(' ');
+  const name = row.team_name || row.display_name || '-';
+  const key = String(row.team_id || row.team_slug || `pos-${pos}`);
+  const dg = num(row.goal_difference);
   return `
-    <tr${cls ? ` class="${cls}"` : ''}>
+    <tr class="${cls}" data-standings-toggle="${escapeHtml(key)}" data-team-id="${escapeHtml(row.team_id || '')}" tabindex="0" aria-expanded="false" aria-label="${escapeHtml(`${pos}. ${name}: ${num(row.points)} puntos. Ver detalle`)}">
       <td>${pos}${zone ? `<span class="sr-only"> (${escapeHtml(zone.label)})</span>` : ''}</td>
-      <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name || row.display_name || '-')}</strong></td>
-      <td><strong>${num(row.points)}</strong></td><td>${num(row.played)}</td><td>${num(row.wins)}</td><td>${num(row.draws)}</td><td>${num(row.losses)}</td><td>${num(row.goals_for)}</td><td>${num(row.goals_against)}</td><td>${num(row.goal_difference)}</td>
+      <td class="col-team"><strong>${teamFlag(row)} <span class="team-label">${escapeHtml(name)}</span></strong></td>
+      <td>${num(row.played)}</td>
+      <td class="col-extra">${num(row.wins)}</td><td class="col-extra">${num(row.draws)}</td><td class="col-extra">${num(row.losses)}</td>
+      <td class="col-extra">${num(row.goals_for)}</td><td class="col-extra">${num(row.goals_against)}</td>
+      <td>${dg > 0 ? '+' : ''}${dg}</td>
+      <td class="col-pts"><strong>${num(row.points)}</strong></td>
+    </tr>
+    <tr class="standings-detail" data-standings-detail="${escapeHtml(key)}" hidden>
+      <td colspan="10">
+        <div class="standings-detail-grid">
+          <span><b>${num(row.wins)}</b>G</span><span><b>${num(row.draws)}</b>E</span><span><b>${num(row.losses)}</b>P</span>
+          <span><b>${num(row.goals_for)}</b>GF</span><span><b>${num(row.goals_against)}</b>GC</span>
+        </div>
+        <div class="form-strip" data-form-slot><span class="form-label">Últimos 5</span><span class="form-loading">…</span></div>
+      </td>
     </tr>`;
 }
 
 function _standingsTable(rows, zones = []) {
   return `
-    <div class="card table-card">
-      <table>
-        <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>J</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
+    <div class="card table-card standings-card">
+      <table class="standings-table">
+        <thead><tr><th scope="col">#</th><th scope="col">Equipo</th><th scope="col" title="Partidos jugados">PJ</th><th scope="col" class="col-extra" title="Ganados">G</th><th scope="col" class="col-extra" title="Empatados">E</th><th scope="col" class="col-extra" title="Perdidos">P</th><th scope="col" class="col-extra" title="Goles a favor">GF</th><th scope="col" class="col-extra" title="Goles en contra">GC</th><th scope="col" title="Diferencia de gol">DG</th><th scope="col" title="Puntos">Pts</th></tr></thead>
         <tbody>${rows.map((row, i) => _standingsRow(row, i, zoneForPosition(zones, num(row.position, i + 1) || i + 1))).join('')}</tbody>
       </table>
     </div>`;
@@ -1190,7 +1221,7 @@ function standingsGlobalHtml(rows) {
         <div class="flag">${teamFlag(row)}</div>
         <div>
           <h3 style="margin:0;font-size:.95rem">${escapeHtml(row.team_name || '-')}</h3>
-          <p style="margin:0;color:var(--muted);font-size:.72rem">${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</p>
+          <p style="margin:0;color:var(--muted);font-size:.75rem">${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</p>
         </div>
       </div>
       <div class="stats-line">
@@ -1359,10 +1390,7 @@ async function renderTeams(options = {}) {
 
 async function openTeamModal({ teamSlug, teamId } = {}) {
   if (!teamSlug && !teamId) return;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal-card"><div class="loading-head"><span>Cargando equipo</span><i></i></div>${skeletonCards(2)}</div>`;
-  document.body.appendChild(overlay);
+  const overlay = createModalOverlay('Cargando equipo');
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) closeModal(overlay);
   });
@@ -1374,18 +1402,75 @@ async function openTeamModal({ teamSlug, teamId } = {}) {
     overlay.querySelectorAll('[data-modal-tab]').forEach((button) => {
       button.addEventListener('click', () => setModalTab(overlay, button.dataset.modalTab));
     });
+    attachRosterInteractions(overlay, detail.roster || []);
   } catch (error) {
     overlay.innerHTML = `<div class="modal-card"><button class="modal-close" data-close-modal>×</button><div class="error">${escapeHtml(error.message || error)}</div></div>`;
     overlay.querySelector('[data-close-modal]').addEventListener('click', () => closeModal(overlay));
   }
 }
 
+function createModalOverlay(loadingLabel) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal-card"><div class="loading-head"><span>${escapeHtml(loadingLabel)}</span><i></i></div>${skeletonCards(2)}</div>`;
+  overlay._returnFocus = document.activeElement;
+  document.body.appendChild(overlay);
+  document.body.classList.add('modal-open');
+  return overlay;
+}
+
 function closeModal(overlay) {
+  const returnFocus = overlay._returnFocus;
   overlay.remove();
+  if (!document.querySelector('.modal-overlay')) document.body.classList.remove('modal-open');
+  if (returnFocus && document.contains(returnFocus)) returnFocus.focus?.();
+}
+
+function attachRosterInteractions(overlay, roster) {
+  let sort = { key: 'minutes', dir: -1 };
+  const statsPanel = overlay.querySelector('[data-modal-panel="stats"]');
+  const openPlayer = (index) => {
+    const player = roster[num(index, -1)];
+    if (!player) return;
+    overlay.querySelector('.player-card-layer')?.remove();
+    const layer = document.createElement('div');
+    layer.className = 'player-card-layer';
+    layer.innerHTML = playerCardHtml(player);
+    overlay.appendChild(layer);
+    const close = () => layer.remove();
+    layer.addEventListener('click', (event) => { if (event.target === layer || event.target.closest('[data-close-player]')) close(); });
+    layer.querySelector('[data-close-player]')?.focus();
+  };
+  overlay.addEventListener('click', (event) => {
+    const sortBtn = event.target.closest('[data-sort-key]');
+    if (sortBtn && statsPanel) {
+      const key = sortBtn.dataset.sortKey;
+      const column = ROSTER_STAT_COLUMNS.find((c) => c.key === key);
+      sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: column?.text ? 1 : -1 };
+      statsPanel.innerHTML = rosterStatsTable(roster, sort);
+      statsPanel.querySelector(`[data-sort-key="${CSS.escape(key)}"]`)?.focus();
+      return;
+    }
+    const playerEl = event.target.closest('[data-player-index]');
+    if (playerEl && !event.target.closest('.player-card-layer')) { openPlayer(playerEl.dataset.playerIndex); return; }
+    const matchEl = event.target.closest('[data-match-id]');
+    if (matchEl && !event.target.closest('.player-card-layer')) openMatchDetail(matchEl.dataset.matchId);
+  });
+  overlay.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest('tr[data-player-index], .team-result-row[data-match-id]');
+    if (!row || event.target !== row) return;
+    event.preventDefault();
+    row.click();
+  });
 }
 
 function setModalTab(overlay, tab) {
-  overlay.querySelectorAll('[data-modal-tab]').forEach((button) => button.classList.toggle('active', button.dataset.modalTab === tab));
+  overlay.querySelectorAll('[data-modal-tab]').forEach((button) => {
+    const active = button.dataset.modalTab === tab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   overlay.querySelectorAll('[data-modal-panel]').forEach((panel) => { panel.hidden = panel.dataset.modalPanel !== tab; });
 }
 
@@ -1394,76 +1479,181 @@ function teamModalHtml(detail) {
   const matches = detail.matches || [];
   const roster = detail.roster || [];
   return `
-    <div class="modal-card team-modal" role="dialog" aria-modal="true">
+    <div class="modal-card team-modal" role="dialog" aria-modal="true" aria-labelledby="team-modal-title">
       <button class="modal-close" data-close-modal aria-label="Cerrar">×</button>
       <header class="modal-header">
         <div class="flag">${teamFlag(team)}</div>
         <div>
-          <h2>${escapeHtml(team.display_name || 'Equipo')}</h2>
+          <h2 id="team-modal-title">${escapeHtml(team.display_name || 'Equipo')}</h2>
           <p>${escapeHtml(groupLabel(team.group_name || team.group_code) || team.country_code || '')}</p>
         </div>
       </header>
       <section class="modal-section">
         <h3>Resultados ${escapeHtml(competitionLabel())}</h3>
-        <div class="team-results">${matches.map(teamResultRow).join('') || emptyState('No hay partidos publicados para este equipo.')}</div>
+        <div class="team-results">${matches.map((m) => teamResultRow(m, team)).join('') || emptyState('No hay partidos publicados para este equipo.')}</div>
       </section>
-      <div class="modal-tabs">
-        <button class="active" data-modal-tab="roster">Plantel</button>
-        <button data-modal-tab="stats">Stats</button>
+      <div class="modal-tabs" role="tablist" aria-label="Plantel y estadísticas">
+        <button class="active" data-modal-tab="roster" id="modal-tab-roster" type="button" role="tab" aria-selected="true" aria-controls="modal-panel-roster">Plantel</button>
+        <button data-modal-tab="stats" id="modal-tab-stats" type="button" role="tab" aria-selected="false" aria-controls="modal-panel-stats">Stats</button>
       </div>
-      <section data-modal-panel="roster">${rosterGrid(roster)}</section>
-      <section data-modal-panel="stats" hidden>${rosterStatsTable(roster)}</section>
+      <section data-modal-panel="roster" id="modal-panel-roster" role="tabpanel" aria-labelledby="modal-tab-roster">${rosterGrid(roster)}</section>
+      <section data-modal-panel="stats" id="modal-panel-stats" role="tabpanel" aria-labelledby="modal-tab-stats" hidden>${rosterStatsTable(roster)}</section>
     </div>`;
 }
 
-function teamResultRow(match) {
+// W/D/L for `teamId` in `match`: team_result when the API sends it, else derived from the score.
+function teamSideResult(match, teamId) {
+  const given = String(match?.team_result || '').toUpperCase();
+  if (['W', 'D', 'L'].includes(given)) return given;
+  if (!isFinishedStatus(match?.status)) return '';
+  const hs = match?.home_score;
+  const as = match?.away_score;
+  if (hs === null || hs === undefined || as === null || as === undefined || !teamId) return '';
+  const isHome = String(match.home?.team_id || '') === String(teamId);
+  const isAway = String(match.away?.team_id || '') === String(teamId);
+  if (!isHome && !isAway) return '';
+  let mine = num(hs);
+  let theirs = num(as);
+  if (isAway) [mine, theirs] = [theirs, mine];
+  if (mine === theirs) {
+    // Penalty shoot-out decides a drawn knockout match.
+    const winner = match.winner_team_id;
+    if (winner) return String(winner) === String(teamId) ? 'W' : 'L';
+    return 'D';
+  }
+  return mine > theirs ? 'W' : 'L';
+}
+
+const RESULT_LABELS = { W: 'G', D: 'E', L: 'P' };
+const RESULT_TITLES = { W: 'Ganado', D: 'Empatado', L: 'Perdido' };
+
+function resultChip(result) {
+  if (!result) return '<em class="result-chip result-none" aria-label="Sin resultado">-</em>';
+  const cls = result === 'W' ? 'result-win' : result === 'L' ? 'result-loss' : 'result-draw';
+  return `<em class="result-chip ${cls}" title="${escapeHtml(RESULT_TITLES[result])}">${escapeHtml(RESULT_LABELS[result])}</em>`;
+}
+
+function teamResultRow(match, team = {}) {
   const home = match.home || {};
   const away = match.away || {};
-  const result = match.team_result || '';
-  const resultClass = result === 'W' ? 'result-win' : result === 'L' ? 'result-loss' : 'result-draw';
-  const score = match.home_score !== null && match.home_score !== undefined ? `${match.home_score}-${match.away_score}` : 'vs';
+  const result = teamSideResult(match, team.team_id);
+  const score = match.home_score !== null && match.home_score !== undefined ? `${num(match.home_score)}-${num(match.away_score)}` : 'vs';
   return `
-    <div class="team-result-row">
+    <div class="team-result-row${match.match_id ? ' clickable-row' : ''}"${match.match_id ? ` data-match-id="${escapeHtml(match.match_id)}" tabindex="0" role="button"` : ''}>
       <span>${escapeHtml(dateLabel(match.kickoff_at).toLowerCase())}</span>
       <strong>${teamFlag(home)} ${escapeHtml(home.display_name || 'Por definir')} vs ${teamFlag(away)} ${escapeHtml(away.display_name || 'Por definir')}</strong>
       <b>${escapeHtml(score)}</b>
-      <em class="${resultClass}">${escapeHtml(result || '-')}</em>
+      ${resultChip(result)}
       <small>${escapeHtml(match.venue?.city || match.venue?.display_name || '')}</small>
     </div>`;
 }
 
 function rosterGrid(roster) {
-  return `<div class="roster-grid">${roster.map((player) => `
-    <div class="player-pill">
+  return `<div class="roster-grid">${roster.map((player, index) => `
+    <button class="player-pill" type="button" data-player-index="${index}" aria-label="${escapeHtml(`Ver ficha de ${player.display_name || 'jugador'}`)}">
       <span>${escapeHtml(player.position || 'UNK')}</span>
       <strong>${escapeHtml(player.display_name || '')}</strong>
-    </div>`).join('') || emptyState('Plantel no disponible.')}</div>`;
+    </button>`).join('') || emptyState('Plantel no disponible.')}</div>`;
 }
 
-function rosterStatsTable(roster) {
+const ROSTER_STAT_COLUMNS = [
+  { key: 'position', label: 'POS', text: true, get: (p) => p.position || '' },
+  { key: 'name', label: 'Jugador', text: true, get: (p) => p.display_name || '' },
+  { key: 'appearances', label: 'J', title: 'Partidos jugados' },
+  { key: 'minutes', label: 'Min', title: 'Minutos' },
+  { key: 'goals', label: 'G', title: 'Goles' },
+  { key: 'assists', label: 'A', title: 'Asistencias' },
+  { key: 'shots_on', label: 'TA arco', title: 'Tiros al arco' },
+  { key: 'key_passes', label: 'PC', title: 'Pases clave' },
+  { key: 'pass_accuracy', label: 'Pase %', title: 'Precisión de pase', optional: true },
+  { key: 'yellow_cards', label: 'TA', title: 'Tarjetas amarillas' },
+  { key: 'red_cards', label: 'TR', title: 'Tarjetas rojas' },
+  { key: 'avg_rating', label: 'Rating', title: 'Rating promedio', optional: true },
+];
+
+function rosterStatValue(player, column) {
+  if (column.get) return column.get(player);
+  const value = (player.stats || {})[column.key];
+  return value === null || value === undefined ? null : num(value);
+}
+
+function sortRoster(roster, sort) {
+  const column = ROSTER_STAT_COLUMNS.find((c) => c.key === sort.key) || ROSTER_STAT_COLUMNS[3];
+  return roster.map((player, index) => ({ player, index })).sort((a, b) => {
+    const va = rosterStatValue(a.player, column);
+    const vb = rosterStatValue(b.player, column);
+    if (column.text) return String(va).localeCompare(String(vb)) * sort.dir;
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1; // missing values always last
+    if (vb === null) return -1;
+    return (va - vb) * sort.dir;
+  });
+}
+
+function rosterStatsTable(roster, sort = { key: 'minutes', dir: -1 }) {
+  const rows = sortRoster(roster, sort);
+  const head = ROSTER_STAT_COLUMNS.map((column) => {
+    const active = column.key === sort.key;
+    const ariaSort = active ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none';
+    return `<th scope="col" aria-sort="${ariaSort}"${column.title ? ` title="${escapeHtml(column.title)}"` : ''}><button type="button" class="sort-btn${active ? ' active' : ''}" data-sort-key="${escapeHtml(column.key)}">${escapeHtml(column.label)}${active ? `<span aria-hidden="true">${sort.dir > 0 ? ' ▲' : ' ▼'}</span>` : ''}</button></th>`;
+  }).join('');
   return `
     <div class="table-card modal-table">
-      <table>
-        <thead><tr><th>POS</th><th>Jugador</th><th title="Partidos jugados">J</th><th>Min</th><th title="Goles">G</th><th title="Asistencias">A</th><th title="Tiros al arco">TA arco</th><th title="Pases clave">PC</th><th title="Precisión de pase">Pase %</th><th title="Tarjetas amarillas">TA</th><th title="Tarjetas rojas">TR</th><th>Rating</th></tr></thead>
-        <tbody>${[...roster].sort((a, b) => num((b.stats || {}).minutes) - num((a.stats || {}).minutes)).map((player) => {
-          const stats = player.stats || {};
-          const optional = (value) => (value === null || value === undefined ? '-' : num(value));
-          return `<tr>
-            <td>${escapeHtml(player.position || 'UNK')}</td>
-            <td><strong>${escapeHtml(player.display_name || '')}</strong></td>
-            <td>${num(stats.appearances)}</td>
-            <td>${num(stats.minutes)}</td>
-            <td>${num(stats.goals)}</td>
-            <td>${num(stats.assists)}</td>
-            <td>${num(stats.shots_on)}</td>
-            <td>${num(stats.key_passes)}</td>
-            <td>${optional(stats.pass_accuracy)}</td>
-            <td>${num(stats.yellow_cards)}</td>
-            <td>${num(stats.red_cards)}</td>
-            <td>${optional(stats.avg_rating)}</td>
-          </tr>`;
-        }).join('') || `<tr><td colspan="12">${escapeHtml('Sin estadísticas de jugadores para esta temporada.')}</td></tr>`}</tbody>
+      <table class="roster-stats-table">
+        <thead><tr>${head}</tr></thead>
+        <tbody>${rows.map(({ player, index }) => `<tr data-player-index="${index}" tabindex="0" class="clickable-row">${ROSTER_STAT_COLUMNS.map((column) => {
+          const value = rosterStatValue(player, column);
+          if (column.key === 'name') return `<td><strong>${escapeHtml(value)}</strong></td>`;
+          if (column.text) return `<td>${escapeHtml(value || 'UNK')}</td>`;
+          return `<td>${value === null ? '-' : value}</td>`;
+        }).join('')}</tr>`).join('') || `<tr><td colspan="${ROSTER_STAT_COLUMNS.length}">${escapeHtml('Sin estadísticas de jugadores para esta temporada.')}</td></tr>`}</tbody>
       </table>
+    </div>`;
+}
+
+function playerAge(player) {
+  if (player.birth_date) {
+    const birth = new Date(player.birth_date);
+    if (!Number.isNaN(birth.getTime())) {
+      const now = new Date();
+      let age = now.getFullYear() - birth.getFullYear();
+      if (now.getMonth() < birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) age -= 1;
+      if (age > 10 && age < 60) return age;
+    }
+  }
+  const fallback = num(player.metadata_age ?? player.age, 0);
+  return fallback > 10 && fallback < 60 ? fallback : null;
+}
+
+const POSITION_LABELS = { G: 'Arquero', GK: 'Arquero', GOALKEEPER: 'Arquero', D: 'Defensa', DEFENDER: 'Defensa', M: 'Mediocampista', MIDFIELDER: 'Mediocampista', F: 'Delantero', FORWARD: 'Delantero', ATTACKER: 'Delantero' };
+
+function playerCardHtml(player) {
+  const stats = player.stats || {};
+  const photo = player.photo_url ? safeUrl(player.photo_url) : '#';
+  const age = playerAge(player);
+  const position = POSITION_LABELS[String(player.position || '').toUpperCase()] || player.position || 'Sin posición';
+  const optional = (value, digits = 0) => (value === null || value === undefined ? '-' : num(value).toFixed(digits));
+  const initials = String(player.display_name || '?').split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase();
+  return `
+    <div class="player-card" role="dialog" aria-modal="true" aria-labelledby="player-card-name">
+      <button class="modal-close" data-close-player aria-label="Cerrar ficha">×</button>
+      <div class="player-card-head">
+        ${photo !== '#'
+          ? `<img class="player-photo" src="${escapeHtml(photo)}" alt="" loading="lazy" width="72" height="72">`
+          : `<div class="player-photo player-photo--empty" aria-hidden="true">${escapeHtml(initials)}</div>`}
+        <div>
+          <h3 id="player-card-name">${escapeHtml(player.display_name || 'Jugador')}</h3>
+          <p>${escapeHtml(position)}${player.shirt_number != null ? ` · #${num(player.shirt_number)}` : ''}${age ? ` · ${num(age)} años` : ''}</p>
+        </div>
+      </div>
+      <div class="player-card-stats">
+        <div><b>${num(stats.appearances)}</b><span>Partidos</span></div>
+        <div><b>${num(stats.minutes)}</b><span>Minutos</span></div>
+        <div><b>${num(stats.goals)}</b><span>Goles</span></div>
+        <div><b>${num(stats.assists)}</b><span>Asistencias</span></div>
+        <div><b>${optional(stats.avg_rating, 2)}</b><span>Rating</span></div>
+        <div><b>${num(stats.yellow_cards)}/${num(stats.red_cards)}</b><span>TA/TR</span></div>
+      </div>
     </div>`;
 }
 
@@ -1547,7 +1737,7 @@ function tieCard(tie) {
     const legNo = num(leg.leg_number, i + 1) || i + 1;
     const pen = matchPenalties(leg);
     return `
-      <div class="tie-leg">
+      <div class="tie-leg"${matchDetailAttrs(leg)}>
         <span class="tie-leg-label">${legNo === 1 ? 'Ida' : legNo === 2 ? 'Vuelta' : `Partido ${legNo}`}</span>
         <span>${escapeHtml(teamShortName(leg.home))} <b>${escapeHtml(score)}</b> ${escapeHtml(teamShortName(leg.away))}${pen ? ` <small>(pen ${pen.home}-${pen.away})</small>` : ''}</span>
         <span>${escapeHtml(leg.kickoff_at ? dateLabel(leg.kickoff_at).toLowerCase() : 'Por definir')}</span>
@@ -1761,7 +1951,7 @@ function attachKnockoutSwipe(container, rerender) {
 
 function knockoutCard(match) {
   return `
-    <article class="card bracket-card fade-in">
+    <article class="card bracket-card fade-in"${matchDetailAttrs(match)}>
       <div class="bracket-top"><span>${escapeHtml(match.match_number ? `Partido ${match.match_number}` : 'Partido')}</span><b>${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</b></div>
       <div class="bracket-team">${teamFlag(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong></div>
       <div class="bracket-vs">${matchScore(match)}</div>
@@ -2049,7 +2239,7 @@ function aiFactorsBlock(opp) {
   const items = opp.aiFactors.length
     ? opp.aiFactors.map((f) => `<li><span class="chip chip--muted">${escapeHtml(f.category || 'other')}</span> ${escapeHtml(f.description || '')}${f.impact_pp != null && Number(f.impact_pp) !== 0 ? ` <b>${Number(f.impact_pp) > 0 ? '+' : ''}${escapeHtml(Number(f.impact_pp).toFixed(1))}pp</b>` : ''}</li>`).join('')
     : opp.aiKeyFactors.map((k) => `<li>${escapeHtml(k)}</li>`).join('');
-  return `<details class="ev-ai-factors"><summary>Factores IA${escapeHtml(mode)}</summary><ul style="margin:.3rem 0 0;padding-left:1rem;font-size:.72rem">${items}</ul></details>`;
+  return `<details class="ev-ai-factors"><summary>Factores IA${escapeHtml(mode)}</summary><ul style="margin:.3rem 0 0;padding-left:1rem;font-size:.75rem">${items}</ul></details>`;
 }
 
 function aiModeLabel(mode) {
@@ -2306,7 +2496,11 @@ function attachBlockChipTooltips(container) {
       e.stopPropagation();
     });
   });
-  document.addEventListener('click', () => tooltip.classList.remove('visible'), { once: false });
+  if (!tooltip.dataset.bound) {
+    // Bound once: renderEV runs on every refresh and must not stack document listeners.
+    document.addEventListener('click', () => tooltip.classList.remove('visible'));
+    tooltip.dataset.bound = '1';
+  }
 }
 
 async function renderEV(options = {}) {
@@ -2402,7 +2596,7 @@ function featureHealthGrid(items) {
           <span class="feature-health-name">${escapeHtml(f.label || f.key || '')}</span>
           <span class="feature-health-sub">${escapeHtml(f.scope || '')} · ${escapeHtml(coverage)}</span>
         </div>
-        <span class="chip ${chipCls}" style="margin-left:auto;font-size:.62rem;flex-shrink:0">${chipLabel}</span>
+        <span class="chip ${chipCls}" style="margin-left:auto;font-size:.75rem;flex-shrink:0">${chipLabel}</span>
       </div>`;
   }).join('')}</div>`;
 }
@@ -2562,7 +2756,27 @@ async function renderModel(options = {}) {
 
 // ─── Stats view ─────────────────────────────────────────────────────────────
 
+let _chartJsPromise = null;
+
+// Chart.js is only needed by the Stats view: inject it on first use (F-A.7).
+function loadChartJs() {
+  if (typeof window.Chart !== 'undefined') return Promise.resolve(window.Chart);
+  if (!_chartJsPromise) {
+    _chartJsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+      script.async = true;
+      script.crossOrigin = 'anonymous';
+      script.onload = () => resolve(window.Chart);
+      script.onerror = () => { _chartJsPromise = null; reject(new Error('No se pudo cargar Chart.js')); };
+      document.head.appendChild(script);
+    });
+  }
+  return _chartJsPromise;
+}
+
 function destroyChart(id) {
+  if (typeof Chart === 'undefined') return;
   const existing = Chart.getChart(id);
   if (existing) existing.destroy();
 }
@@ -2575,7 +2789,7 @@ function calibrationBucketChart(calibrationData) {
     <div class="chart-wrap">
       <canvas id="${id}"></canvas>
     </div>
-    <p style="font-size:.74rem;color:var(--muted);margin:.4rem 0 0">Barras = tasa observada. Línea = predicha. La diagonal perfecta = calibración ideal.</p>`;
+    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">Barras = tasa observada. Línea = predicha. La diagonal perfecta = calibración ideal.</p>`;
 }
 
 function initCalibrationChart(calibrationData) {
@@ -2661,7 +2875,7 @@ function metricsHistoryChart(series) {
   if (!series.length) return `<div class="chart-wrap">${quantEmptyState('📈', 'Sin historial de métricas', 'La serie aparece cuando el loop diario registra métricas por competición.')}</div>`;
   return `
     <div class="chart-wrap"><canvas id="${id}" aria-label="${escapeHtml('Historial diario de métricas del modelo')}" role="img"></canvas></div>
-    <p style="font-size:.74rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI paper.')}</p>`;
+    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI paper.')}</p>`;
 }
 
 function initMetricsHistoryChart(series) {
@@ -2766,8 +2980,8 @@ function aiLeagueCards(policies, track) {
           <span>Brier IA (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'ai')))}</b>
           <span>Brier calibrado (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'calibrated')))}</b>
         </div>
-        ${reason ? `<div style="font-size:.7rem;color:var(--muted)">${escapeHtml(reason)}</div>` : ''}
-        ${rows ? `<ul style="margin:.4rem 0 0;padding-left:1rem;font-size:.72rem">${rows}</ul>` : '<div style="font-size:.72rem;color:var(--muted)">Sin ajustes IA liquidados aún.</div>'}
+        ${reason ? `<div style="font-size:.75rem;color:var(--muted)">${escapeHtml(reason)}</div>` : ''}
+        ${rows ? `<ul style="margin:.4rem 0 0;padding-left:1rem;font-size:.75rem">${rows}</ul>` : '<div style="font-size:.75rem;color:var(--muted)">Sin ajustes IA liquidados aún.</div>'}
       </article>`;
   }).join('')}</div>`;
 }
@@ -2842,12 +3056,13 @@ async function renderStats(options = {}) {
     </div>`;
 
   // Init charts after DOM painted (only if data exists)
-  if (hasData) setTimeout(() => {
+  if (hasData) loadChartJs().catch(() => null).then(() => {
+    if (state.view !== 'stats' || typeof Chart === 'undefined') return;
     initMetricsHistoryChart(history);
     initCalibrationChart(calibration);
     initRoiChart(buckets);
     initPicksDonut(decisions);
-  }, 0);
+  });
 }
 
 // ─── News view ───────────────────────────────────────────────────────────────
@@ -2938,14 +3153,21 @@ async function render(options = {}) {
   }
 }
 
-document.querySelectorAll('.tab').forEach((button) => {
+function switchView(view) {
+  closeMoreSheet();
+  if (!view || state.view === view) return;
+  state.view = view;
+  const topTab = document.querySelector(`.tab[data-view="${CSS.escape(view)}"]`);
+  root.setAttribute('aria-labelledby', topTab?.id || '');
+  updateTabs();
+  window.scrollTo({ top: 0 });
+  render();
+}
+
+document.querySelectorAll('.tab, .bottom-tab[data-view], .more-item[data-view]').forEach((button) => {
   button.addEventListener('click', () => {
     if (button.hidden) return;
-    if (state.view === button.dataset.view) return;
-    state.view = button.dataset.view;
-    root.setAttribute('aria-labelledby', button.id || '');
-    updateTabs();
-    render();
+    switchView(button.dataset.view);
   });
 });
 
@@ -3151,16 +3373,22 @@ function leaguePickerItem(comp, icon) {
   const slug = catalogSlug(comp);
   const isActive = slug === SEASON;
   const meta = [comp.season_label, comp.region].filter(Boolean).join(' · ');
+  const fav = favoriteLeagues().includes(slug);
+  const search = `${catalogName(comp)} ${meta} ${slug}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   return `
-    <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
-            data-season="${escapeHtml(slug)}" type="button"
-            role="option" aria-selected="${isActive ? 'true' : 'false'}">
-      <span class="league-picker-item-icon" aria-hidden="true">${escapeHtml(icon || '🏆')}</span>
-      <span class="league-picker-item-info">
-        <span class="league-picker-item-name">${escapeHtml(catalogName(comp))}</span>
-        <span class="league-picker-item-meta">${escapeHtml(meta)}</span>
-      </span>
-    </button>`;
+    <div class="league-picker-row" data-search="${escapeHtml(search)}">
+      <button class="league-picker-item${isActive ? ' league-picker-item--active' : ''}"
+              data-season="${escapeHtml(slug)}" type="button"
+              role="option" aria-selected="${isActive ? 'true' : 'false'}">
+        <span class="league-picker-item-icon" aria-hidden="true">${escapeHtml(icon || '🏆')}</span>
+        <span class="league-picker-item-info">
+          <span class="league-picker-item-name">${escapeHtml(catalogName(comp))}</span>
+          <span class="league-picker-item-meta">${escapeHtml(meta)}</span>
+        </span>
+      </button>
+      <button class="league-fav-btn${fav ? ' is-fav' : ''}" type="button" data-fav="${escapeHtml(slug)}"
+              aria-pressed="${fav ? 'true' : 'false'}" aria-label="${escapeHtml(`${fav ? 'Quitar de' : 'Agregar a'} favoritos: ${catalogName(comp)}`)}">${fav ? '★' : '☆'}</button>
+    </div>`;
 }
 
 function leaguePickerGroup(label, icon, items) {
@@ -3172,7 +3400,35 @@ function leaguePickerGroup(label, icon, items) {
     </div>`;
 }
 
+// Favorites: only competition slugs are stored (no PII).
+const FAVORITES_STORAGE = 'match_alpha_fav_leagues';
+
+function favoriteLeagues() {
+  try {
+    const list = JSON.parse(localStorage.getItem(FAVORITES_STORAGE) || '[]');
+    return Array.isArray(list) ? list.filter((v) => typeof v === 'string' && /^[a-z0-9-]{1,80}$/.test(v)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function toggleFavoriteLeague(slug) {
+  const list = favoriteLeagues();
+  const next = list.includes(slug) ? list.filter((s) => s !== slug) : [...list, slug].slice(-20);
+  localStorage.setItem(FAVORITES_STORAGE, JSON.stringify(next));
+}
+
+function leaguePickerFavorites(catalog) {
+  const favs = favoriteLeagues();
+  const items = catalog.entries.filter((c) => favs.includes(catalogSlug(c)));
+  return leaguePickerGroup('Favoritas', '★', items.map((comp) => leaguePickerItem(comp, comp.ui?.icon || COMPETITION_ICONS[catalogSlug(comp)] || '🏆')));
+}
+
 function buildLeaguePickerDropdown(catalog) {
+  return leaguePickerFavorites(catalog) + buildLeaguePickerGroups(catalog);
+}
+
+function buildLeaguePickerGroups(catalog) {
   if (catalog.source === 'api') {
     // Group by competition_type, then order by region/name. Icons come from the catalog.
     const groups = new Map();
@@ -3219,7 +3475,55 @@ function switchSeason(slug) {
 
   let isOpen = false;
 
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop league-sheet-backdrop';
+  backdrop.hidden = true;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', () => closePicker());
+  const isSheet = () => window.matchMedia('(max-width: 680px)').matches;
+
+  function wirePicker(catalog) {
+    dropdown.innerHTML = `
+      <div class="league-picker-head">
+        <span class="sheet-grabber" aria-hidden="true"></span>
+        <label class="sr-only" for="league-search">Buscar competición</label>
+        <input id="league-search" class="league-search" type="search" placeholder="Buscar liga o copa…" autocomplete="off" enterkeyhint="search">
+      </div>
+      <div class="league-picker-list">${buildLeaguePickerDropdown(catalog)}</div>`;
+    const search = dropdown.querySelector('.league-search');
+    const applyFilter = () => {
+      const q = search.value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      dropdown.querySelectorAll('.league-picker-row').forEach((row) => { row.hidden = Boolean(q) && !row.dataset.search.includes(q); });
+      dropdown.querySelectorAll('.league-picker-group').forEach((group) => {
+        group.hidden = ![...group.querySelectorAll('.league-picker-row')].some((row) => !row.hidden);
+      });
+    };
+    search.addEventListener('input', applyFilter);
+    dropdown.querySelector('.league-picker-list').addEventListener('click', (event) => {
+      const favBtn = event.target.closest('[data-fav]');
+      if (favBtn) {
+        event.stopPropagation();
+        toggleFavoriteLeague(favBtn.dataset.fav);
+        const query = search.value;
+        wirePicker(catalog);
+        const again = dropdown.querySelector('.league-search');
+        again.value = query;
+        again.dispatchEvent(new Event('input'));
+        dropdown.querySelector(`[data-fav="${CSS.escape(favBtn.dataset.fav)}"]`)?.focus();
+        return;
+      }
+      const item = event.target.closest('[data-season]');
+      if (item) switchSeason(item.dataset.season);
+    });
+    if (!isSheet()) search.focus({ preventScroll: true });
+  }
+
   function positionPicker() {
+    if (isSheet()) {
+      dropdown.style.top = '';
+      dropdown.style.left = '';
+      return;
+    }
     const rect = btn.getBoundingClientRect();
     dropdown.style.top = `${Math.round(rect.bottom + 8)}px`;
     dropdown.style.left = `${Math.round(rect.left)}px`;
@@ -3230,19 +3534,16 @@ function switchSeason(slug) {
     btn.setAttribute('aria-expanded', 'true');
     positionPicker();
     dropdown.removeAttribute('hidden');
+    backdrop.hidden = !isSheet();
     dropdown.innerHTML = '<div class="league-picker-group"><div class="league-picker-group-label">Cargando…</div></div>';
-    loadCompetitionCatalog().then((catalog) => {
-      dropdown.innerHTML = buildLeaguePickerDropdown(catalog);
-      dropdown.querySelectorAll('[data-season]').forEach((item) => {
-        item.addEventListener('click', () => switchSeason(item.dataset.season));
-      });
-    });
+    loadCompetitionCatalog().then((catalog) => { if (isOpen) wirePicker(catalog); });
   }
 
   function closePicker() {
     isOpen = false;
     btn.setAttribute('aria-expanded', 'false');
     dropdown.setAttribute('hidden', '');
+    backdrop.hidden = true;
   }
 
   btn.addEventListener('click', (e) => {
@@ -3255,7 +3556,7 @@ function switchSeason(slug) {
   });
 
   document.addEventListener('click', (e) => {
-    if (isOpen && !dropdown.contains(e.target) && e.target !== btn) closePicker();
+    if (isOpen && !dropdown.contains(e.target) && !btn.contains(e.target)) closePicker();
   });
 
   document.addEventListener('keydown', (e) => {
@@ -3282,5 +3583,357 @@ function switchSeason(slug) {
   if ('ResizeObserver' in window) new ResizeObserver(apply).observe(topbar);
   else window.addEventListener('resize', apply);
 })();
+
+// ─── Standings: expandable rows with last-5 form (F-A.2) ─────────────────────
+
+async function teamLastFive(teamId) {
+  if (!teamId) return [];
+  const data = await cached('web/matches', {}, 120000);
+  return (data.matches || [])
+    .filter((m) => isFinishedStatus(m.status) && [m.home?.team_id, m.away?.team_id].map(String).includes(String(teamId)))
+    .sort((a, b) => (a.kickoff_at < b.kickoff_at ? 1 : -1))
+    .slice(0, 5)
+    .map((m) => ({ match: m, result: teamSideResult(m, teamId) }));
+}
+
+async function fillFormSlot(slot, teamId) {
+  if (!slot || slot.dataset.loaded) return;
+  slot.dataset.loaded = '1';
+  try {
+    const items = await teamLastFive(teamId);
+    const chips = items.map(({ match, result }) => {
+      const rival = String(match.home?.team_id) === String(teamId) ? match.away : match.home;
+      const label = `${RESULT_TITLES[result] || 'Sin resultado'} vs ${rival?.display_name || 'rival'} ${num(match.home_score)}-${num(match.away_score)}`;
+      return `<span class="form-chip-wrap" title="${escapeHtml(label)}">${resultChip(result)}<span class="sr-only">${escapeHtml(label)}</span></span>`;
+    }).join('');
+    slot.innerHTML = `<span class="form-label">Últimos 5</span>${chips || '<span class="form-empty">Sin partidos finalizados</span>'}`;
+  } catch {
+    slot.dataset.loaded = '';
+    slot.innerHTML = '<span class="form-label">Últimos 5</span><span class="form-empty">No disponible</span>';
+  }
+}
+
+function toggleStandingsRow(tr) {
+  const key = tr.dataset.standingsToggle;
+  const detail = tr.parentElement?.querySelector(`[data-standings-detail="${CSS.escape(key)}"]`);
+  if (!detail) return;
+  const open = detail.hidden;
+  detail.hidden = !open;
+  tr.setAttribute('aria-expanded', open ? 'true' : 'false');
+  tr.classList.toggle('is-expanded', open);
+  if (open) fillFormSlot(detail.querySelector('[data-form-slot]'), tr.dataset.teamId);
+}
+
+// One delegated listener for the whole view root (no per-render rebinding).
+root.addEventListener('click', (event) => {
+  const standingsRow = event.target.closest('[data-standings-toggle]');
+  if (standingsRow) { toggleStandingsRow(standingsRow); return; }
+  const card = event.target.closest('[data-match-id]');
+  if (card) openMatchDetail(card.dataset.matchId);
+});
+root.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const target = event.target.closest('[data-standings-toggle], [data-match-id]');
+  if (!target || target !== event.target) return;
+  event.preventDefault();
+  target.click();
+});
+
+// ─── Match detail sheet (F-A.4) ──────────────────────────────────────────────
+
+// Attributes that make a card/row open the match detail sheet (delegated on #view-root).
+function matchDetailAttrs(match) {
+  if (!match?.match_id) return '';
+  const label = `Ver detalle: ${match.home?.display_name || 'Por definir'} vs ${match.away?.display_name || 'Por definir'}`;
+  return ` data-match-id="${escapeHtml(match.match_id)}" tabindex="0" role="button" aria-label="${escapeHtml(label)}"`;
+}
+
+const MATCH_STAT_LABELS = [
+  ['ball_possession', 'Posesión', '%'],
+  ['expected_goals', 'xG', ''],
+  ['total_shots', 'Tiros', ''],
+  ['shots_on_goal', 'Tiros al arco', ''],
+  ['shots_insidebox', 'Tiros dentro del área', ''],
+  ['blocked_shots', 'Tiros bloqueados', ''],
+  ['corner_kicks', 'Córners', ''],
+  ['total_passes', 'Pases', ''],
+  ['passes_accurate', 'Pases precisos', ''],
+  ['goalkeeper_saves', 'Atajadas', ''],
+  ['fouls', 'Faltas', ''],
+  ['offsides', 'Fueras de juego', ''],
+  ['yellow_cards', 'Amarillas', ''],
+  ['red_cards', 'Rojas', ''],
+];
+
+const OFFICIAL_ROLE_LABELS = { REFEREE: 'Árbitro', MAIN_REFEREE: 'Árbitro', ASSISTANT: 'Asistente', ASSISTANT_REFEREE: 'Asistente', FOURTH_OFFICIAL: 'Cuarto árbitro', VAR: 'VAR' };
+
+function matchStatsCompareHtml(stats) {
+  const byKey = Object.fromEntries((stats || []).map((s) => [s.key, s]));
+  const rows = MATCH_STAT_LABELS.filter(([key]) => byKey[key]).map(([key, label, suffix]) => {
+    const h = num(byKey[key].home);
+    const a = num(byKey[key].away);
+    const total = h + a;
+    const hp = total > 0 ? Math.round((h / total) * 100) : 50;
+    const fmt = (v) => (key === 'expected_goals' ? v.toFixed(2) : String(Math.round(v))) + suffix;
+    return `
+      <div class="stat-compare">
+        <div class="stat-compare-head"><b>${escapeHtml(fmt(h))}</b><span>${escapeHtml(label)}</span><b>${escapeHtml(fmt(a))}</b></div>
+        <div class="stat-compare-bar" aria-hidden="true">
+          <i class="home${h >= a ? ' lead' : ''}" style="width:${hp}%"></i><i class="away${a > h ? ' lead' : ''}" style="width:${100 - hp}%"></i>
+        </div>
+      </div>`;
+  }).join('');
+  return rows || emptyState('Estadísticas del partido no disponibles.');
+}
+
+function lineupPitchHtml(side, team) {
+  const starters = side?.starters || [];
+  const bench = side?.bench || [];
+  if (!starters.length && !bench.length) return '';
+  const playerChip = (p) => `
+    <span class="lineup-player">
+      <b>${p.shirt_number != null ? num(p.shirt_number) : ''}</b>
+      <span>${escapeHtml(p.display_name || '')}${p.is_captain ? ' (C)' : ''}</span>
+    </span>`;
+  let main;
+  const gridOk = side.formation && starters.every((p) => /^\d+:\d+$/.test(p.grid || ''));
+  if (gridOk) {
+    const rows = {};
+    starters.forEach((p) => { const [r, c] = p.grid.split(':').map(Number); (rows[r] ||= []).push({ ...p, col: c }); });
+    main = `<div class="pitch">${Object.keys(rows).map(Number).sort((a, b) => a - b).map((r) => `
+      <div class="pitch-row">${rows[r].sort((x, y) => x.col - y.col).map(playerChip).join('')}</div>`).join('')}</div>`;
+  } else {
+    main = `<div class="lineup-list">${starters.map(playerChip).join('')}</div>`;
+  }
+  return `
+    <div class="lineup-team">
+      <h4>${teamFlag(team)} ${escapeHtml(team?.display_name || '')}${side.formation ? ` <small>${escapeHtml(side.formation)}</small>` : ''}</h4>
+      ${main}
+      ${bench.length ? `<details class="lineup-bench"><summary>Suplentes (${bench.length})</summary><div class="lineup-list">${bench.map(playerChip).join('')}</div></details>` : ''}
+    </div>`;
+}
+
+function eventIcon(type, detail) {
+  const t = String(type || '').toLowerCase();
+  const d = String(detail || '').toLowerCase();
+  if (t === 'goal') return d.includes('own') ? '⚽ (ag)' : d.includes('penalty') ? '⚽ (p)' : '⚽';
+  if (t === 'card') return d.includes('red') ? '🟥' : '🟨';
+  if (t === 'subst') return '🔁';
+  if (t === 'var') return '📺';
+  return '•';
+}
+
+const EVENT_DETAIL_LABELS = {
+  'yellow card': 'Amarilla', 'red card': 'Roja', 'second yellow card': 'Segunda amarilla',
+  'normal goal': 'Gol', penalty: 'Gol de penal', 'own goal': 'Autogol', 'missed penalty': 'Penal fallado',
+  'goal cancelled': 'Gol anulado (VAR)', 'goal disallowed - offside': 'Gol anulado por fuera de juego', 'penalty confirmed': 'Penal confirmado (VAR)',
+};
+
+function eventDetailLabel(type, detail) {
+  const d = String(detail || '').toLowerCase();
+  if (String(type || '').toLowerCase() === 'subst' || d.startsWith('substitution')) return 'Cambio';
+  return EVENT_DETAIL_LABELS[d] || detail || type || '';
+}
+
+function eventsTimelineHtml(events) {
+  if (!events?.length) return emptyState('Sin eventos registrados.');
+  return `<ol class="event-timeline">${events.map((e) => {
+    const minute = e.minute != null ? `${num(e.minute)}${e.stoppage_minute ? `+${num(e.stoppage_minute)}` : ''}'` : '';
+    const isSub = String(e.type || '').toLowerCase() === 'subst';
+    const who = isSub
+      ? `${escapeHtml(e.related_player_name || '')}${e.related_player_name ? ' ↔ ' : ''}${escapeHtml(e.player_name || '')}`
+      : escapeHtml(e.player_name || e.detail || '');
+    return `
+      <li class="event-item event-item--${e.side === 'away' ? 'away' : 'home'}">
+        <span class="event-min">${escapeHtml(minute)}</span>
+        <span class="event-icon" aria-hidden="true">${escapeHtml(eventIcon(e.type, e.detail))}</span>
+        <span class="event-text">${who}<small>${escapeHtml(eventDetailLabel(e.type, e.detail))}</small></span>
+      </li>`;
+  }).join('')}</ol>`;
+}
+
+function h2hHtml(rows, match) {
+  if (!rows?.length) return emptyState('Sin enfrentamientos previos registrados.');
+  return `<div class="h2h-list">${rows.map((h) => `
+    <div class="h2h-row">
+      <span class="h2h-date">${escapeHtml(dateLabel(h.kickoff_at))}</span>
+      <span class="h2h-teams">${escapeHtml(h.home_name || '')} <b>${num(h.home_score)}-${num(h.away_score)}</b> ${escapeHtml(h.away_name || '')}</span>
+      ${resultChip(h.result_for_home)}
+    </div>`).join('')}</div>
+    <p class="hint">Resultado desde el punto de vista de ${escapeHtml(match.home?.display_name || 'el local')}.</p>`;
+}
+
+function probabilityCompareHtml(detail) {
+  const preds = (detail.predictions || []).filter((p) => String(p.market_code).toUpperCase() === '1X2');
+  const noVig = detail.odds?.no_vig_1x2 || {};
+  const best = detail.odds?.best_1x2 || {};
+  if (!preds.length && !Object.keys(noVig).length) return emptyState('Sin predicción del modelo ni cuotas para este partido.');
+  const bySel = Object.fromEntries(preds.map((p) => [String(p.selection_code).toUpperCase(), p]));
+  const m = detail.match || {};
+  const labels = { HOME: m.home?.display_name || 'Local', DRAW: 'Empate', AWAY: m.away?.display_name || 'Visita' };
+  const bar = (label, value, cls) => (value == null ? '' : `
+    <div class="prob-bar-row">
+      <span class="prob-bar-label">${escapeHtml(label)}</span>
+      <div class="prob-bar-track"><div class="prob-bar-fill ${cls}" style="width:${Math.round(num(value) * 100)}%"></div></div>
+      <span class="prob-bar-value">${Math.round(num(value) * 100)}%</span>
+    </div>`);
+  const blocks = ['HOME', 'DRAW', 'AWAY'].map((sel) => {
+    const p = bySel[sel] || {};
+    const model = p.calibrated_probability ?? p.raw_probability;
+    return `
+      <div class="prob-block">
+        <div class="prob-block-title"><strong>${escapeHtml(labels[sel])}</strong>${best[sel] ? `<span>Mejor cuota ${num(best[sel]).toFixed(2)}</span>` : ''}</div>
+        <div class="prob-bars">
+          ${bar('Modelo', model, 'prob-bar-fill--model')}
+          ${bar('IA', p.ai_adjusted_probability, 'prob-bar-fill--ai')}
+          ${bar('Mercado', noVig[sel], 'prob-bar-fill--market')}
+        </div>
+      </div>`;
+  }).join('');
+  const ai = detail.ai_factors;
+  const factors = ai ? [
+    ...(ai.factors || []).map((f) => f.description).filter(Boolean),
+    ...(!(ai.factors || []).length ? ai.key_factors || [] : []),
+  ].slice(0, 6) : [];
+  return `
+    ${blocks}
+    <p class="hint">Mercado = probabilidad sin margen (no-vig) a partir de la mejor cuota disponible.</p>
+    ${factors.length ? `
+      <div class="ai-factors-box">
+        <h4>Factores de la IA${ai.confidence ? ` <small>confianza ${escapeHtml(({ low: 'baja', medium: 'media', high: 'alta' })[String(ai.confidence).toLowerCase()] || ai.confidence)}</small>` : ''}${ai.mode ? ` <small>${escapeHtml(String(ai.mode).toUpperCase() === 'SHADOW' ? 'modo sombra' : ai.mode)}</small>` : ''}</h4>
+        <ul>${factors.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
+      </div>` : ''}`;
+}
+
+function matchInfoHtml(detail) {
+  const m = detail.match || {};
+  const v = m.venue || {};
+  const rows = [];
+  if (v.display_name || v.city) rows.push(['Estadio', [v.display_name, v.city].filter(Boolean).join(', ')]);
+  if (v.capacity) rows.push(['Capacidad', num(v.capacity).toLocaleString('es-CL')]);
+  if (v.surface) rows.push(['Superficie', v.surface]);
+  rows.push(['Inicio', chileDateTimeLabel(m.kickoff_at)]);
+  const local = localVenueTimeLabel(m);
+  if (local) rows.push(['Hora local', local]);
+  (detail.officials || []).forEach((o) => rows.push([OFFICIAL_ROLE_LABELS[String(o.role || '').toUpperCase()] || 'Árbitro', o.display_name || '-']));
+  if (!(detail.officials || []).length) rows.push(['Árbitro', 'No informado']);
+  return `
+    <dl class="match-info">${rows.map(([k, val]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(val)}</dd></div>`).join('')}</dl>
+    ${weatherHtml(m) || '<p class="hint">Clima no disponible para este partido.</p>'}`;
+}
+
+function matchDetailHtml(detail) {
+  const m = detail.match || {};
+  const home = m.home || { display_name: 'Por definir' };
+  const away = m.away || { display_name: 'Por definir' };
+  const meta = [matchStageLabel(m), matchGroupLabel(m)].filter(Boolean).join(' · ');
+  const lineups = detail.lineups || {};
+  const hasLineups = ['home', 'away'].some((s) => (lineups[s]?.starters || []).length);
+  const tabs = [
+    ['summary', 'Resumen', probabilityCompareHtml(detail) + `<h3 class="md-subtitle">Info</h3>` + matchInfoHtml(detail)],
+    ['lineups', 'Alineaciones', hasLineups ? `<div class="lineups">${lineupPitchHtml(lineups.home, home)}${lineupPitchHtml(lineups.away, away)}</div>` : emptyState('Alineaciones aún no publicadas.')],
+    ['events', 'Eventos', eventsTimelineHtml(detail.events)],
+    ['stats', 'Stats', matchStatsCompareHtml(detail.team_stats)],
+    ['h2h', 'Cara a cara', h2hHtml(detail.head_to_head, m)],
+  ];
+  return `
+    <div class="modal-card match-detail" role="dialog" aria-modal="true" aria-labelledby="md-title">
+      <button class="modal-close" data-close-modal aria-label="Cerrar">×</button>
+      <header class="md-header">
+        <span class="stage-chip">${escapeHtml(meta || 'Partido')}</span>
+        <h2 id="md-title" class="sr-only">${escapeHtml(`${home.display_name} vs ${away.display_name}`)}</h2>
+        <div class="teams-row">
+          <div class="team-side"><div class="flag">${teamFlag(home)}</div><div class="name">${escapeHtml(home.display_name)}</div></div>
+          ${matchScore(m)}
+          <div class="team-side"><div class="flag">${teamFlag(away)}</div><div class="name">${escapeHtml(away.display_name)}</div></div>
+        </div>
+        <div class="md-status ${statusClass(m.status)}">${matchTimeHtml(m)}</div>
+      </header>
+      <div class="modal-tabs md-tabs" role="tablist" aria-label="Detalle del partido">
+        ${tabs.map(([key, label], i) => `<button type="button" role="tab" id="md-tab-${key}" data-modal-tab="${key}" aria-controls="md-panel-${key}" aria-selected="${i === 0}" class="${i === 0 ? 'active' : ''}">${escapeHtml(label)}</button>`).join('')}
+      </div>
+      ${tabs.map(([key, , html], i) => `<section class="md-panel" id="md-panel-${key}" data-modal-panel="${key}" role="tabpanel" aria-labelledby="md-tab-${key}"${i === 0 ? '' : ' hidden'}>${html}</section>`).join('')}
+    </div>`;
+}
+
+async function openMatchDetail(matchId) {
+  if (!matchId || !/^[0-9a-f-]{36}$/i.test(matchId)) return;
+  const overlay = createModalOverlay('Cargando partido');
+  overlay.classList.add('modal-overlay--sheet');
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) closeModal(overlay); });
+  try {
+    const detail = await cached('web/match-detail', { match_id: matchId }, 60000);
+    if (!document.contains(overlay)) return;
+    overlay.innerHTML = matchDetailHtml(detail);
+    overlay.querySelectorAll('[data-modal-tab]').forEach((button) => {
+      button.addEventListener('click', () => setModalTab(overlay, button.dataset.modalTab));
+    });
+    overlay.querySelector('[data-close-modal]').addEventListener('click', () => closeModal(overlay));
+    overlay.querySelector('[data-close-modal]').focus();
+  } catch (error) {
+    if (!document.contains(overlay)) return;
+    overlay.innerHTML = `<div class="modal-card"><button class="modal-close" data-close-modal aria-label="Cerrar">×</button><div class="error">${escapeHtml(error.message || error)}</div></div>`;
+    overlay.querySelector('[data-close-modal]').addEventListener('click', () => closeModal(overlay));
+  }
+}
+
+// Escape closes the top-most layer (player card → modal).
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const playerLayer = document.querySelector('.player-card-layer');
+  if (playerLayer) { playerLayer.remove(); return; }
+  const overlays = document.querySelectorAll('.modal-overlay');
+  if (overlays.length) { closeModal(overlays[overlays.length - 1]); return; }
+  closeMoreSheet();
+});
+
+// ─── Bottom navigation "Más" sheet (F-A.5) ───────────────────────────────────
+
+function closeMoreSheet() {
+  const sheet = document.getElementById('more-sheet');
+  if (!sheet || sheet.hidden) return;
+  sheet.hidden = true;
+  document.getElementById('more-backdrop').hidden = true;
+  document.querySelector('.bottom-tab[data-more]')?.setAttribute('aria-expanded', 'false');
+}
+
+(function initMoreSheet() {
+  const trigger = document.querySelector('.bottom-tab[data-more]');
+  const sheet = document.getElementById('more-sheet');
+  const backdrop = document.getElementById('more-backdrop');
+  if (!trigger || !sheet || !backdrop) return;
+  trigger.addEventListener('click', () => {
+    const open = sheet.hidden;
+    sheet.hidden = !open;
+    backdrop.hidden = !open;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) sheet.querySelector('.more-item:not([hidden])')?.focus();
+  });
+  backdrop.addEventListener('click', closeMoreSheet);
+})();
+
+// ─── Offline banner + service worker (F-A.6) ─────────────────────────────────
+
+function setOfflineBanner(show) {
+  const banner = document.getElementById('offline-banner');
+  if (banner) banner.hidden = !(show || navigator.onLine === false);
+}
+
+window.addEventListener('online', () => setOfflineBanner(false));
+window.addEventListener('offline', () => setOfflineBanner(true));
+
+(function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  if (location.protocol !== 'https:' && !isLocal) return;
+  // Relative URL + scope so it works under the GitHub Pages prefix (/match_alpha_web/).
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => null);
+  });
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'ma-offline-cache') setOfflineBanner(true);
+  });
+})();
+
 
 render();
