@@ -1584,7 +1584,7 @@ async function renderBracketMode(ctx) {
   if (!stages.length) return renderMatchList(ctx);
   const data = await cached('web/knockout', {}, 90000, ctx.options);
   const matches = data.matches || [];
-  setStatus('Torneo', `${matches.length} partidos`);
+  setStatus('Torneo', matches.length ? `${matches.length} partidos` : 'Llaves por definir');
   const byStage = matches.reduce((acc, match) => {
     const key = knockoutStageKey(match);
     (acc[key] ||= []).push(match);
@@ -3257,6 +3257,16 @@ function switchSeason(slug) {
       labelEl.textContent = name;
     }
   }
+})();
+
+// Sticky sub-bars (knockout tabs, toolbar) sit right below the header; its height varies on mobile.
+(function syncTopbarHeight() {
+  const topbar = document.querySelector('.topbar');
+  if (!topbar) return;
+  const apply = () => document.documentElement.style.setProperty('--topbar-h', `${Math.ceil(topbar.getBoundingClientRect().height)}px`);
+  apply();
+  if ('ResizeObserver' in window) new ResizeObserver(apply).observe(topbar);
+  else window.addEventListener('resize', apply);
 })();
 
 render();

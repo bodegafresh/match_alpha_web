@@ -85,14 +85,14 @@
 
 html {
   width: 100%; max-width: 100%;
-  min-height: 100%; overflow-x: hidden;
+  min-height: 100%; overflow-x: hidden; overflow-x: clip;
   background: var(--bg);
   scroll-behavior: smooth;
 }
 
 body {
   margin: 0; width: 100%; max-width: 100vw;
-  min-height: 100vh; overflow-x: hidden;
+  min-height: 100vh; overflow-x: hidden; overflow-x: clip;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04';
   color: var(--text);
@@ -255,7 +255,7 @@ a { color: var(--accent-2); }
   width: min(1360px, calc(100% - 3rem));
   max-width: 100%;
   margin: .75rem auto 4rem;
-  overflow-x: hidden;
+  overflow-x: hidden; overflow-x: clip;
 }
 
 .status-strip {
@@ -1463,14 +1463,14 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .day-content { gap: .75rem; }
 
   .toolbar {
-    position: sticky; top: 80px; z-index: 6;
+    position: sticky; top: var(--topbar-h, 98px); z-index: 6;
     margin-inline: -.375rem;
     padding: .18rem .375rem .28rem;
     background: linear-gradient(180deg, rgba(6, 13, 23, .94), rgba(6, 13, 23, .78));
     backdrop-filter: blur(14px);
   }
   .knockout-tabs {
-    position: sticky; top: 80px; z-index: 6;
+    position: sticky; top: var(--topbar-h, 98px); z-index: 6;
     margin-inline: -.375rem;
     padding: .2rem .375rem .4rem;
     background: linear-gradient(180deg, rgba(6, 13, 23, .94), rgba(6, 13, 23, .78));
@@ -1666,3 +1666,7 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .stats-step-dot--active { background: rgba(46, 196, 247, .14); border-color: rgba(46, 196, 247, .3); color: var(--accent-2); }
 .stats-roadmap-step strong { font-size: .78rem; font-weight: 700; color: var(--text); display: block; }
 .stats-roadmap-step small  { font-size: .7rem; color: var(--muted); }
+
+/* Mobile knockout: the stage navigator already shows the round title; avoid repeating it above the cards. */
+.knockout-mobile-view .knockout-column > header h2 { display: none; }
+.knockout-mobile-view .knockout-column > header { justify-content: flex-end; min-height: 0; margin-bottom: .2rem; }
