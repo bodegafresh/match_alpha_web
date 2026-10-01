@@ -2370,27 +2370,23 @@ async function renderEV(options = {}) {
 
 // ─── Model view ────────────────────────────────────────────────────────────
 
-const FEATURE_HEALTH = [
-  { key: 'elo',      label: 'ELO ratings',        status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'ELO Global, Internacional y Doméstico calculados incrementalmente' },
-  { key: 'form',     label: 'Forma reciente',      status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'Últimos 5 partidos: puntos, diferencia de goles' },
-  { key: 'odds',     label: 'Odds / Mercado',      status: 'ok',      freshness: 'Variable', coverage: '80%',  detail: 'Cuotas pre-kickoff capturadas. Sin API key: odds del bootstrap Excel' },
-  { key: 'lineups',  label: 'Lineups confirmados', status: 'pending', freshness: '—',        coverage: '0%',   detail: 'Pendiente: integración con fuente de alineaciones (Phase 2)' },
-  { key: 'weather',  label: 'Clima / Condiciones', status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'Google News RSS activo, sin API key requerida' },
-  { key: 'xg',       label: 'xG histórico',        status: 'pending', freshness: '—',        coverage: '0%',   detail: 'Pendiente: fuente de datos xG (Phase 2)' },
-  { key: 'news',     label: 'Noticias / Lesiones', status: 'ok',      freshness: 'Diario',   coverage: '100%', detail: 'Google News RSS activo' },
-];
-
-function featureHealthGrid() {
-  return `<div class="feature-health-grid">${FEATURE_HEALTH.map((f) => {
-    const dotCls = f.status === 'ok' ? 'health-dot--ok' : f.status === 'partial' ? 'health-dot--partial' : 'health-dot--pending';
-    const chipCls = f.status === 'ok' ? 'chip--ok' : f.status === 'partial' ? 'chip--warn' : 'chip--muted';
-    const chipLabel = f.status === 'ok' ? 'OK' : f.status === 'partial' ? 'Parcial' : 'Pendiente';
+// Real coverage from GET /model/feature-health (no hardcoded values).
+function featureHealthGrid(items) {
+  if (!Array.isArray(items) || !items.length) return emptyState('Cobertura de features no disponible.');
+  return `<div class="feature-health-grid">${items.map((f) => {
+    const status = ['ok', 'partial'].includes(f.status) ? f.status : 'pending';
+    const dotCls = status === 'ok' ? 'health-dot--ok' : status === 'partial' ? 'health-dot--partial' : 'health-dot--pending';
+    const chipCls = status === 'ok' ? 'chip--ok' : status === 'partial' ? 'chip--warn' : 'chip--muted';
+    const chipLabel = status === 'ok' ? 'OK' : status === 'partial' ? 'Parcial' : 'Pendiente';
+    const total = num(f.total);
+    const coverage = total ? `${num(f.have)}/${total} · ${num(f.coverage_pct)}%` : 'sin partidos en ventana';
+    const detail = `${f.scope || ''}${f.freshness ? ` · actualizado ${dateLabel(f.freshness)}` : ''}`;
     return `
-      <div class="feature-health-item" title="${escapeHtml(f.detail)}">
+      <div class="feature-health-item" title="${escapeHtml(detail)}">
         <span class="health-dot ${dotCls}"></span>
         <div class="feature-health-meta">
-          <span class="feature-health-name">${escapeHtml(f.label)}</span>
-          <span class="feature-health-sub">${escapeHtml(f.freshness)} · ${escapeHtml(f.coverage)}</span>
+          <span class="feature-health-name">${escapeHtml(f.label || f.key || '')}</span>
+          <span class="feature-health-sub">${escapeHtml(f.scope || '')} · ${escapeHtml(coverage)}</span>
         </div>
         <span class="chip ${chipCls}" style="margin-left:auto;font-size:.62rem;flex-shrink:0">${chipLabel}</span>
       </div>`;
@@ -2508,14 +2504,16 @@ async function renderModel(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="model-view"><div class="loading-head"><span>Cargando Modelo</span><i></i></div></div>`;
   }
-  let diagnostics = [], calibration = [];
+  let diagnostics = [], calibration = [], healthItems = [];
   try {
-    const [diagData, calData] = await Promise.all([
+    const [diagData, calData, healthData] = await Promise.all([
       cached('model/diagnostics', {}, 120000, options),
       cached('calibration/summary', { limit: 5 }, 120000, options),
+      cached('model/feature-health', {}, 120000, options).catch(() => ({ items: [] })),
     ]);
     diagnostics = diagData.models || [];
     calibration = calData.calibration || [];
+    healthItems = healthData?.items || [];
   } catch (error) {
     if (error.name === 'AbortError') return;
     root.innerHTML = `<div class="model-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
@@ -2537,7 +2535,7 @@ async function renderModel(options = {}) {
       </section>
       <section class="model-section">
         <h3>Feature Health</h3>
-        ${featureHealthGrid()}
+        ${featureHealthGrid(healthItems)}
       </section>
       <section class="model-section">
         <h3>Feedback Loop</h3>
