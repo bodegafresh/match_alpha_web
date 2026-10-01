@@ -2230,7 +2230,38 @@ function adaptEVOpportunity(raw) {
     aiMode: aiAdj?.policy?.mode || null,
     aiFactors: Array.isArray(aiAdj?.factors) ? aiAdj.factors.slice(0, 4) : [],
     aiKeyFactors: Array.isArray(aiAdj?.key_factors) ? aiAdj.key_factors.slice(0, 3) : [],
+    marketLabel: marketLabel(raw.market_code, explanation),
+    topFactors: topModelFactors(explanation),
   };
+}
+
+// Phase F: market label (1X2 / O-U 2.5 / BTTS) and top model factors (feature contributions + Dixon-Coles).
+function marketLabel(code, explanation) {
+  const c = String(code || '').toUpperCase();
+  if (c === 'OVER_UNDER') return `O/U ${explanation?.line != null ? Number(explanation.line) : 2.5}`;
+  if (c === 'BTTS') return 'BTTS';
+  return c || '1X2';
+}
+
+function topModelFactors(explanation) {
+  const out = [];
+  const dc = explanation?.dixon_coles;
+  if (dc && Array.isArray(dc.top_scores) && dc.top_scores.length) {
+    out.push(`Marcador probable ${dc.top_scores[0].score} (${Math.round(Number(dc.top_scores[0].p || 0) * 100)}%)`);
+  }
+  const contrib = Array.isArray(explanation?.feature_contributions) ? explanation.feature_contributions : [];
+  const labels = { elo_diff: 'Dif. ELO', attack_strength: 'Ataque', defense_strength: 'Defensa rival', rest_days: 'Descanso' };
+  contrib.filter((f) => f && f.value != null && f.feature !== 'rest_days').slice(0, 2).forEach((f) => {
+    out.push(`${labels[f.feature] || f.feature} ${Number(f.value).toFixed(f.feature === 'elo_diff' ? 0 : 2)}`);
+  });
+  const mk = explanation?.market;
+  if (mk && mk.n_books) out.push(`${mk.n_books} casas`);
+  return out.slice(0, 3);
+}
+
+function modelFactorsLine(opp) {
+  if (!opp.topFactors || !opp.topFactors.length) return '';
+  return `<div class="ev-model-factors">${opp.topFactors.map((f) => `<span class="chip chip--muted">${escapeHtml(f)}</span>`).join('')}</div>`;
 }
 
 function aiFactorsBlock(opp) {
@@ -2380,10 +2411,11 @@ function evHeroCard(opp) {
           </div>
         </div>
         <div class="ev-hero-tags">
-          <span class="chip chip--warn">${escapeHtml(opp.marketCode || '1X2')}</span>
+          <span class="chip chip--warn">${escapeHtml(opp.marketLabel || opp.marketCode || '1X2')}</span>
           <span class="chip chip--blue">${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</span>
           ${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confidence: ${confPct}%">${confPct}</div>` : ''}
         </div>
+        ${modelFactorsLine(opp)}
       </div>
     </div>`;
 }
@@ -2423,9 +2455,10 @@ function evOpportunityRow(opp) {
         <div class="ev-match-label">${escapeHtml(opp.matchLabel)}</div>
         <div class="ev-match-date">${escapeHtml(kickoff)}</div>
         ${lambdaBlock ? `<div class="ev-match-insights">${escapeHtml(lambdaBlock)}</div>` : ''}
+        ${modelFactorsLine(opp)}
         ${aiFactorsBlock(opp)}
       </td>
-      <td class="ev-td-market">${escapeHtml(opp.marketCode || '—')}</td>
+      <td class="ev-td-market">${escapeHtml(opp.marketLabel || opp.marketCode || '—')}</td>
       <td class="ev-td-sel"><b>${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</b></td>
       <td class="ev-td-num">${opp.modelProb != null ? `<b>${fmtPct(opp.modelProb)}</b>` : '—'}</td>
       <td class="ev-td-num ev-market-prob">${opp.marketProb != null ? fmtPct(opp.marketProb) : '—'}</td>
@@ -2986,11 +3019,41 @@ function aiLeagueCards(policies, track) {
   }).join('')}</div>`;
 }
 
+// Phase F: per league × market card — log-loss model vs market, ECE, CLV, n.
+const MARKET_STAGE_LABEL = { calibrated: 'calibrado', ensemble: 'ensamble', pre: 'pre-calib.', dixon_coles: 'Dixon-Coles', poisson: 'Poisson' };
+
+function marketLeagueCards(cards) {
+  if (!cards.length) return quantEmptyState('📊', 'Sin métricas por mercado', 'Se generan con el job market_stage_metrics.');
+  const f4 = (v) => (v != null && !isNaN(v) ? Number(v).toFixed(4) : '—');
+  const pct = (v) => (v != null && !isNaN(v) ? `${(Number(v) * 100).toFixed(1)}%` : '—');
+  return `<div class="market-card-grid">${cards.map((c) => {
+    const diff = c.vs_market_ll_diff;
+    const diffCls = diff == null ? '' : diff < 0 ? 'market-card__diff--good' : 'market-card__diff--bad';
+    const ml = c.market === 'OVER_UNDER' ? 'O/U 2.5' : c.market;
+    return `
+      <article class="card market-card">
+        <header class="market-card__head">
+          <strong>${escapeHtml(c.competition_name || c.competition || '')}</strong>
+          <span class="chip chip--warn">${escapeHtml(ml || '')}</span>
+        </header>
+        <div class="market-card__grid">
+          <span>Log-loss ${escapeHtml(MARKET_STAGE_LABEL[c.model_stage] || 'modelo')}</span><b>${escapeHtml(f4(c.model_log_loss))}</b>
+          <span>Log-loss mercado</span><b>${escapeHtml(f4(c.market_log_loss))}</b>
+          <span>vs mercado</span><b class="${diffCls}">${diff == null ? '—' : escapeHtml(`${diff > 0 ? '+' : ''}${Number(diff).toFixed(4)}`)}</b>
+          <span>ECE</span><b>${escapeHtml(f4(c.model_ece))}</b>
+          <span>CLV medio</span><b>${escapeHtml(pct(c.clv_avg))}</b>
+          <span>ROI paper</span><b>${escapeHtml(pct(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(pct(c.roi_ci_low))}, ${escapeHtml(pct(c.roi_ci_high))}]</small>` : ''}</b>
+          <span>n</span><b>${escapeHtml(String(c.n ?? 0))}</b>
+        </div>
+      </article>`;
+  }).join('')}</div>`;
+}
+
 async function renderStats(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando Stats</span><i></i></div></div>`;
   }
-  let calibration = [], buckets = [], decisions = [], history = [], aiPolicies = [], aiTrack = [];
+  let calibration = [], buckets = [], decisions = [], history = [], aiPolicies = [], aiTrack = [], marketCards = [];
   try {
     const [calData, roiData, bankData] = await Promise.all([
       cached('calibration/summary', { limit: 5 }, 120000, options),
@@ -3010,6 +3073,7 @@ async function renderStats(options = {}) {
     const histData = await cached('model/metrics/history', { days: 30 }, 300000, options);
     history = Array.isArray(histData?.series) ? histData.series : [];
     aiPolicies = Array.isArray(histData?.ai_policy) ? histData.ai_policy : [];
+    marketCards = Array.isArray(histData?.market_cards) ? histData.market_cards : [];
   } catch (error) {
     if (error.name === 'AbortError') return;
     history = [];
@@ -3024,7 +3088,7 @@ async function renderStats(options = {}) {
 
   setStatus('Stats', `${decisions.length} picks`);
 
-  const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0 || aiPolicies.length > 0;
+  const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0 || aiPolicies.length > 0 || marketCards.length > 0;
 
   root.innerHTML = `
     <div class="stats-view">
@@ -3032,6 +3096,10 @@ async function renderStats(options = {}) {
       <section class="stats-section">
         <h3>KPIs del Modelo</h3>
         ${statsKpiBar(calibration, buckets)}
+      </section>
+      <section class="stats-section">
+        <h3>Modelo vs mercado por liga y mercado</h3>
+        ${marketLeagueCards(marketCards)}
       </section>
       <section class="stats-section">
         <h3>IA por liga (modelo vs IA vs calibrado)</h3>

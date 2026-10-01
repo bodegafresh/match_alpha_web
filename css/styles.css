@@ -1968,3 +1968,14 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .idq-btn:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
 
 .idq-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Phase F — per league × market model cards, EV model factors */
+.market-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: .8rem; }
+.market-card { padding: .8rem; min-width: 0; }
+.market-card__head { display: flex; justify-content: space-between; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.market-card__grid { font-size: .8rem; margin-top: .4rem; display: grid; grid-template-columns: 1fr auto; gap: .25rem .6rem; }
+.market-card__grid small { font-size: .75rem; color: var(--muted); }
+.market-card__diff--good { color: var(--green, #16a34a); }
+.market-card__diff--bad { color: var(--red, #dc2626); }
+.ev-model-factors { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; font-size: .75rem; }
+.ev-model-factors .chip { font-size: .75rem; }
