@@ -2002,3 +2002,19 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .ops-sev--crit { background: #c0392b; color: #fff; }
 .ops-sev--warn { background: #e67e22; color: #fff; }
 .ops-sev--info { background: var(--hover); color: inherit; }
+
+/* ─── Phase G: seeds, "viene de" badges, format notes, derived tables ─────── */
+.seed-badge, .origin-badge {
+  display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 12px; line-height: 1.4; font-weight: 600; white-space: nowrap; vertical-align: middle;
+}
+.seed-badge { background: var(--surface-2, rgba(127,127,127,.15)); color: var(--muted, inherit); min-width: 20px; justify-content: center; }
+.origin-badge { background: rgba(59,130,246,.14); color: var(--accent, #3b82f6); max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.bracket-node-team .origin-badge { max-width: 92px; }
+.stage-format-note, .derived-note { margin: 4px 0 10px; font-size: 12px; color: var(--muted, inherit); }
+.averages-table .avg-seasons { font-size: 12px; color: var(--muted, inherit); font-weight: 400; }
+.averages-table td:last-child, .averages-table th:last-child { text-align: right; }
+@media (max-width: 480px) {
+  .origin-badge { max-width: 84px; }
+  .bracket-team { flex-wrap: wrap; row-gap: 2px; }
+}
