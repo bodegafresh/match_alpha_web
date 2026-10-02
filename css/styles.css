@@ -2018,3 +2018,32 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
   .origin-badge { max-width: 84px; }
   .bracket-team { flex-wrap: wrap; row-gap: 2px; }
 }
+
+/* ─── Team identity (crest + country) ─────────────────────────────────────── */
+.team-mark {
+  position: relative; display: inline-flex; align-items: center; gap: .25em;
+  vertical-align: -.2em; line-height: 1;
+}
+.team-crest {
+  width: 1.35em; height: 1.35em; object-fit: contain; flex-shrink: 0;
+  display: inline-block; vertical-align: -.25em;
+}
+.team-crest--small { width: 1em; height: 1em; }
+.team-crest--fallback {
+  display: inline-grid; place-items: center;
+  border-radius: 50%; background: var(--surface-2, rgba(127, 127, 127, .18));
+  color: var(--muted); font-size: .5em; font-weight: 700; letter-spacing: .02em;
+  width: 2.7em; height: 2.7em; line-height: 1;
+}
+.team-mark__flag {
+  position: absolute; right: -.35em; bottom: -.2em;
+  font-size: .5em; line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35));
+}
+.team-nation {
+  display: block; margin-top: .1rem;
+  color: var(--muted); font-size: .72rem; font-weight: 500; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.col-team .team-nation { margin-left: 1.7em; }
+.team-side .team-crest { filter: drop-shadow(0 6px 12px rgba(0, 0, 0, .25)); }

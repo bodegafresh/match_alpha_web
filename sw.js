@@ -1,17 +1,16 @@
 /* Match Alpha service worker (Fase A.6).
  *
  * - Same-origin GET assets: stale-while-revalidate.
- * - API GET /api/v1/web/* (read endpoints only): network-first with cache fallback
- *   (served "stale" when offline, flagged with the x-ma-offline header so the page can
- *   show "Sin conexión — mostrando último dato"). Responses are refreshed on every
- *   successful request.
+ * - API GET /api/v1/web/* (read endpoints only): stale-while-revalidate (fresh copy < 60 s served
+ *   at once; older copy served when the network is slow or down, flagged x-ma-stale / x-ma-offline so
+ *   the page can say so). Responses are refreshed on every successful request.
  * - Never cached: non-GET, requests carrying an Authorization or X-Internal-Key header
  *   (internal/job keys travel there), non-/web/ API paths, non-OK or non-JSON responses.
  * - Caches are capped (MAX_API_ENTRIES / MAX_ASSET_ENTRIES), oldest entries evicted first.
  *
  * Registered with a relative URL/scope, so it works under the GitHub Pages prefix.
  */
-const VERSION = 'v20261002gh';
+const VERSION = 'v20261003id';
 const ASSET_CACHE = `ma-assets-${VERSION}`;
 const API_CACHE = 'ma-api-v1';
 const MAX_API_ENTRIES = 80;
@@ -48,26 +47,59 @@ async function notifyOffline() {
   clients.forEach((client) => client.postMessage({ type: 'ma-offline-cache' }));
 }
 
-async function apiNetworkFirst(request) {
+// API reads: stale-while-revalidate with a freshness window.
+//   * cached copy younger than FRESH_MS → served immediately, refreshed in the background;
+//   * older copy → network first, but if the network is slow (Render free tier waking up, > SLOW_MS) the
+//     cached copy is served right away and the network response still updates the cache for next time;
+//   * network failure → cached copy flagged x-ma-offline (banner "mostrando último dato").
+const FRESH_MS = 60 * 1000;
+const SLOW_MS = 4000;
+
+async function putApi(cache, key, response) {
+  const type = response.headers.get('content-type') || '';
+  if (!response.ok || !type.includes('application/json')) return;
+  const headers = new Headers(response.headers);
+  headers.set('x-ma-cached-at', String(Date.now()));
+  await cache.put(key, new Response(await response.clone().blob(), { status: response.status, statusText: response.statusText, headers }));
+  trimCache(API_CACHE, MAX_API_ENTRIES);
+}
+
+function flagged(hit, header) {
+  return hit.blob().then((body) => {
+    const headers = new Headers(hit.headers);
+    headers.set(header, '1');
+    return new Response(body, { status: hit.status, statusText: hit.statusText, headers });
+  });
+}
+
+async function apiStaleWhileRevalidate(event) {
+  const { request } = event;
   const cache = await caches.open(API_CACHE);
   // Cache key without auth: the URL only (read-only public data).
   const key = new Request(request.url, { method: 'GET' });
-  try {
-    const response = await fetch(request);
-    const type = response.headers.get('content-type') || '';
-    if (response.ok && type.includes('application/json')) {
-      await cache.put(key, response.clone());
-      trimCache(API_CACHE, MAX_API_ENTRIES);
-    }
+  const hit = await cache.match(key);
+  const network = fetch(request).then(async (response) => {
+    await putApi(cache, key, response);
     return response;
-  } catch (error) {
-    const hit = await cache.match(key);
-    if (!hit) throw error;
-    notifyOffline();
-    const headers = new Headers(hit.headers);
-    headers.set('x-ma-offline', '1');
-    return new Response(await hit.blob(), { status: hit.status, statusText: hit.statusText, headers });
+  });
+  if (hit) {
+    const age = Date.now() - Number(hit.headers.get('x-ma-cached-at') || 0);
+    if (age < FRESH_MS) {
+      event.waitUntil(network.catch(() => null));
+      return hit;
+    }
+    const slow = new Promise((resolve) => setTimeout(resolve, SLOW_MS, 'slow'));
+    try {
+      const winner = await Promise.race([network, slow]);
+      if (winner !== 'slow') return winner;
+      event.waitUntil(network.catch(() => null));
+      return flagged(hit, 'x-ma-stale');
+    } catch {
+      notifyOffline();
+      return flagged(hit, 'x-ma-offline');
+    }
   }
+  return network;
 }
 
 async function assetStaleWhileRevalidate(event) {
@@ -99,7 +131,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (isCacheableApi(request, url)) {
-    event.respondWith(apiNetworkFirst(request));
+    event.respondWith(apiStaleWhileRevalidate(event));
     return;
   }
   if (url.origin === self.location.origin) event.respondWith(assetStaleWhileRevalidate(event));

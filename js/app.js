@@ -229,28 +229,39 @@ function knockoutStageKey(match) {
   return match.stage_code || match.stage_name || stages[0]?.key || 'KNOCKOUT';
 }
 
-// Flags come from the backend (flag_emoji: 🏴 tag sequences for ENG/SCO/WAL, ISO flags otherwise).
-// flag_code is only used when it is an ISO alpha-2 (regional indicators); anything else → neutral icon.
-function flagFromCode(code) {
-  const c = String(code || '').trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(c)) return '';
-  return String.fromCodePoint(...[...c].map((ch) => 0x1F1E6 + ch.charCodeAt(0) - 65));
+// Team flag / crest / nation rendering lives in js/team-identity.js (MA_TEAM, unit-tested). The competition
+// scope comes from the layout (metadata.team_scope), never from competition names.
+function teamScope() {
+  return state.layout?.metadata?.team_scope || null;
 }
 
-function neutralFlag() {
-  return '<span class="placeholder-icon flag-neutral" aria-hidden="true">⚽</span>';
+function teamIdentity(team) {
+  return team?.identity || {};
 }
 
 function teamFlag(team) {
-  if (team?.flag_asset) {
-    const src = safeUrl(team.flag_asset);
-    if (src !== '#') return `<img class="flag-img" src="${escapeHtml(src)}" alt="" loading="lazy">`;
-  }
-  if (team?.flag_emoji) return deco(team.flag_emoji);
-  const fromCode = flagFromCode(team?.flag_code || team?.country_code);
-  if (fromCode) return deco(fromCode);
-  return team?.is_placeholder ? '<span class="placeholder-icon" aria-hidden="true">◇</span>' : neutralFlag();
+  return window.MA_TEAM.flag(team);
 }
+
+function teamMark(team) {
+  return window.MA_TEAM.mark(team, teamScope());
+}
+
+// "🇦🇷 Argentina" under a club name, only in international club competitions (redundant elsewhere).
+function teamNationHtml(team) {
+  return window.MA_TEAM.nation(team, teamScope());
+}
+
+// Broken / blocked crest image → initials badge (error events do not bubble: capture phase).
+document.addEventListener('error', (event) => {
+  const img = event.target;
+  if (!(img instanceof HTMLImageElement) || !img.classList.contains('team-crest')) return;
+  const span = document.createElement('span');
+  span.className = 'team-crest team-crest--fallback';
+  span.setAttribute('aria-hidden', 'true');
+  span.textContent = img.dataset.initials || '?';
+  img.replaceWith(span);
+}, true);
 
 function layoutKeyToView(key) {
   return {
@@ -459,20 +470,29 @@ async function apiGet(path, params = {}, options = {}) {
   // Read key travels as X-API-Key (accepted by require_read_key); the service worker only
   // caches requests WITHOUT an Authorization header, so internal Bearer keys are never cached.
   const headers = key ? { 'X-API-Key': key } : {};
-  // 30-second timeout so the page doesn't freeze when Render backend is waking up
-  const { signal, cancel, timedOut } = requestSignal(options.signal, REQUEST_TIMEOUT_MS);
+  // Timeout so the page doesn't freeze when the Render free backend is waking up (~50 s): one automatic
+  // retry with a longer timeout, telling the user what is going on, before giving up.
   let response;
-  try {
-    response = await fetch(url, { headers, signal });
-  } catch (err) {
-    if (err.name === 'TimeoutError' || timedOut()) {
-      const te = new Error('Servidor despertando: tardó demasiado en responder. Intenta de nuevo en unos segundos.');
-      te.name = 'TimeoutError';
-      throw te;
+  for (let attempt = 1; ; attempt += 1) {
+    const { signal, cancel, timedOut } = requestSignal(options.signal, attempt === 1 ? REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS * 2);
+    try {
+      response = await fetch(url, { headers, signal });
+      break;
+    } catch (err) {
+      const isTimeout = err.name === 'TimeoutError' || timedOut();
+      if (isTimeout && attempt === 1 && !options.signal?.aborted) {
+        setStatus('Despertando servidor…', 'reintentando');
+        continue;
+      }
+      if (isTimeout) {
+        const te = new Error('Servidor despertando: tardó demasiado en responder. Intenta de nuevo en unos segundos.');
+        te.name = 'TimeoutError';
+        throw te;
+      }
+      throw err;
+    } finally {
+      cancel();
     }
-    throw err;
-  } finally {
-    cancel();
   }
   setOfflineBanner(response.headers.get('x-ma-offline') === '1');
   const json = await response.json().catch(() => ({}));
@@ -693,9 +713,9 @@ function matchCard(match) {
         <span class="match-time ${statusClass(match.status)}">${matchTimeHtml(match)}</span>
       </div>
       <div class="teams-row">
-        <div class="team-side"><div class="flag">${teamFlag(home)}</div><div class="name" title="${escapeHtml(home.display_name)}">${escapeHtml(teamShortName(home))}</div></div>
+        <div class="team-side"><div class="flag">${teamMark(home)}</div><div class="name" title="${escapeHtml(home.display_name)}">${escapeHtml(teamShortName(home))}</div>${teamNationHtml(home)}</div>
         ${matchScore(match)}
-        <div class="team-side"><div class="flag">${teamFlag(away)}</div><div class="name" title="${escapeHtml(away.display_name)}">${escapeHtml(teamShortName(away))}</div></div>
+        <div class="team-side"><div class="flag">${teamMark(away)}</div><div class="name" title="${escapeHtml(away.display_name)}">${escapeHtml(teamShortName(away))}</div>${teamNationHtml(away)}</div>
       </div>
       ${venueDetailHtml(match)}
       ${weatherHtml(match)}
@@ -930,7 +950,7 @@ function _standingsRow(row, index, zone = null) {
   return `
     <tr class="${cls}" data-standings-toggle="${escapeHtml(key)}" data-team-id="${escapeHtml(row.team_id || '')}" tabindex="0" aria-expanded="false" aria-label="${escapeHtml(`${pos}. ${name}: ${num(row.points)} puntos. Ver detalle`)}">
       <td>${pos}${zone ? `<span class="sr-only"> (${escapeHtml(zone.label)})</span>` : ''}</td>
-      <td class="col-team"><strong>${teamFlag(row)} <span class="team-label">${escapeHtml(name)}</span></strong></td>
+      <td class="col-team"><strong>${teamMark(row)} <span class="team-label">${escapeHtml(name)}</span></strong>${teamNationHtml(row)}</td>
       <td>${num(row.played)}</td>
       <td class="col-extra">${num(row.wins)}</td><td class="col-extra">${num(row.draws)}</td><td class="col-extra">${num(row.losses)}</td>
       <td class="col-extra">${num(row.goals_for)}</td><td class="col-extra">${num(row.goals_against)}</td>
@@ -1213,7 +1233,7 @@ function standingsGlobalHtml(rows) {
   const tableRows = rows.map((row) => `
     <tr>
       <td><strong>${row.global_position != null ? num(row.global_position) : '-'}</strong></td>
-      <td><strong>${teamFlag(row)} ${escapeHtml(row.team_name || '-')}</strong></td>
+      <td><strong>${teamMark(row)} ${escapeHtml(row.team_name || '-')}</strong></td>
       <td>${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</td>
       <td><strong>${num(row.points)}</strong></td>
       <td>${num(row.played)}</td>
@@ -1233,7 +1253,7 @@ function standingsGlobalHtml(rows) {
         <span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(row.status))}</span>
       </header>
       <div class="team-head" style="margin:.35rem 0 .25rem">
-        <div class="flag">${teamFlag(row)}</div>
+        <div class="flag">${teamMark(row)}</div>
         <div>
           <h3 style="margin:0;font-size:.95rem">${escapeHtml(row.team_name || '-')}</h3>
           <p style="margin:0;color:var(--muted);font-size:.75rem">${escapeHtml(groupLabel(row.group_name || row.group_code || row.stage_name || row.stage_code || ''))}</p>
@@ -1289,7 +1309,7 @@ function teamCatalogCard(team) {
     <article class="card team-card clickable-card fade-in" data-team-slug="${escapeHtml(teamSlug || '')}" data-team-id="${escapeHtml(teamId || '')}" tabindex="0">
       <div class="team-card-top">
         <div class="team-head">
-          <div class="flag">${teamFlag(team)}</div>
+          <div class="flag">${teamMark(team)}</div>
           <div>
             <h3>${escapeHtml(team.display_name || team.team_name)}</h3>
             <p>${escapeHtml(groupLabel(team.group_name || team.group_code || team.stage_name || ''))}</p>
@@ -1306,7 +1326,7 @@ function teamCatalogCard(team) {
       </div>
       <div style="margin-top:.55rem;display:flex;justify-content:space-between;align-items:center;gap:.5rem">
         <span class="chip chip--muted">${escapeHtml(qualificationStatusLabel(team.status))}</span>
-        <small style="color:var(--muted)">${escapeHtml(team.country_code || '')}</small>
+        ${teamNationHtml(team)}
       </div>
     </article>`;
 }
@@ -1497,10 +1517,10 @@ function teamModalHtml(detail) {
     <div class="modal-card team-modal" role="dialog" aria-modal="true" aria-labelledby="team-modal-title">
       <button class="modal-close" data-close-modal aria-label="Cerrar">×</button>
       <header class="modal-header">
-        <div class="flag">${teamFlag(team)}</div>
+        <div class="flag">${teamMark(team)}</div>
         <div>
           <h2 id="team-modal-title">${escapeHtml(team.display_name || 'Equipo')}</h2>
-          <p>${escapeHtml(groupLabel(team.group_name || team.group_code) || team.country_code || '')}</p>
+          <p>${escapeHtml(groupLabel(team.group_name || team.group_code) || teamIdentity(team).nation_name || '')}</p>
         </div>
       </header>
       <section class="modal-section">
@@ -1556,7 +1576,7 @@ function teamResultRow(match, team = {}) {
   return `
     <div class="team-result-row${match.match_id ? ' clickable-row' : ''}"${match.match_id ? ` data-match-id="${escapeHtml(match.match_id)}" tabindex="0" role="button"` : ''}>
       <span>${escapeHtml(dateLabel(match.kickoff_at).toLowerCase())}</span>
-      <strong>${teamFlag(home)} ${escapeHtml(home.display_name || 'Por definir')} vs ${teamFlag(away)} ${escapeHtml(away.display_name || 'Por definir')}</strong>
+      <strong>${teamMark(home)} ${escapeHtml(home.display_name || 'Por definir')} vs ${teamMark(away)} ${escapeHtml(away.display_name || 'Por definir')}</strong>
       <b>${escapeHtml(score)}</b>
       ${resultChip(result)}
       <small>${escapeHtml(match.venue?.city || match.venue?.display_name || '')}</small>
@@ -1761,8 +1781,8 @@ function tieCard(tie) {
   const agg = tie.aggregate;
   return `
     <article class="card bracket-card tie-card fade-in">
-      <div class="bracket-team">${teamFlag(tie.teamA)} <strong>${escapeHtml(teamName(tie.teamA))}</strong>${teamBadges(tie.teamA)}</div>
-      <div class="bracket-team">${teamFlag(tie.teamB)} <strong>${escapeHtml(teamName(tie.teamB))}</strong>${teamBadges(tie.teamB)}</div>
+      <div class="bracket-team">${teamMark(tie.teamA)} <strong>${escapeHtml(teamName(tie.teamA))}</strong>${teamBadges(tie.teamA)}</div>
+      <div class="bracket-team">${teamMark(tie.teamB)} <strong>${escapeHtml(teamName(tie.teamB))}</strong>${teamBadges(tie.teamB)}</div>
       <div class="tie-legs">${tie.legs.map(legRow).join('')}</div>
       <div class="tie-aggregate">
         <span>Global <strong>${agg ? `${agg.a}-${agg.b}` : '—'}</strong>${tie.penalties ? ` · Pen ${tie.penalties.home}-${tie.penalties.away}` : ''}</span>
@@ -1780,13 +1800,13 @@ function tieBracketNode(tie) {
   return `
     <div class="bracket-node${live ? ' bracket-node--live' : ''}">
       <div class="bracket-node-team${aWin ? ' bracket-node-team--winner' : ''}">
-        <span class="bracket-node-flag">${teamFlag(tie.teamA)}</span>
+        <span class="bracket-node-flag">${teamMark(tie.teamA)}</span>
         <span class="bracket-node-name">${escapeHtml(teamName(tie.teamA))}</span>${teamBadges(tie.teamA)}
         ${agg ? `<span class="bracket-node-score${aWin ? ' bracket-node-score--win' : ''}">${agg.a}</span>` : ''}
       </div>
       <div class="bracket-node-divider"></div>
       <div class="bracket-node-team${bWin ? ' bracket-node-team--winner' : ''}">
-        <span class="bracket-node-flag">${teamFlag(tie.teamB)}</span>
+        <span class="bracket-node-flag">${teamMark(tie.teamB)}</span>
         <span class="bracket-node-name">${escapeHtml(teamName(tie.teamB))}</span>${teamBadges(tie.teamB)}
         ${agg ? `<span class="bracket-node-score${bWin ? ' bracket-node-score--win' : ''}">${agg.b}</span>` : ''}
       </div>
@@ -1899,13 +1919,13 @@ function bracketNodeCard(match) {
     <div class="bracket-node${isLive ? ' bracket-node--live' : ''}">
       ${dateStr ? `<div class="bracket-node-date">${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} CL</div>` : ''}
       <div class="bracket-node-team${homeWin ? ' bracket-node-team--winner' : ''}">
-        <span class="bracket-node-flag">${teamFlag(match.home)}</span>
+        <span class="bracket-node-flag">${teamMark(match.home)}</span>
         <span class="bracket-node-name">${escapeHtml(match.home?.display_name || match.home?.slot_label || '?')}</span>${teamBadges(match.home)}
         ${hasScore ? `<span class="bracket-node-score${homeWin ? ' bracket-node-score--win' : ''}">${num(match.home_score)}</span>` : ''}
       </div>
       <div class="bracket-node-divider"></div>
       <div class="bracket-node-team${awayWin ? ' bracket-node-team--winner' : ''}">
-        <span class="bracket-node-flag">${teamFlag(match.away)}</span>
+        <span class="bracket-node-flag">${teamMark(match.away)}</span>
         <span class="bracket-node-name">${escapeHtml(match.away?.display_name || match.away?.slot_label || '?')}</span>${teamBadges(match.away)}
         ${hasScore ? `<span class="bracket-node-score${awayWin ? ' bracket-node-score--win' : ''}">${num(match.away_score)}</span>` : ''}
       </div>
@@ -1970,9 +1990,9 @@ function knockoutCard(match) {
   return `
     <article class="card bracket-card fade-in"${matchDetailAttrs(match)}>
       <div class="bracket-top"><span>${escapeHtml(match.match_number ? `Partido ${match.match_number}` : 'Partido')}</span><b>${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</b></div>
-      <div class="bracket-team">${teamFlag(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong>${teamBadges(match.home)}</div>
+      <div class="bracket-team">${teamMark(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong>${teamBadges(match.home)}</div>
       <div class="bracket-vs">${matchScore(match)}</div>
-      <div class="bracket-team">${teamFlag(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong>${teamBadges(match.away)}</div>
+      <div class="bracket-team">${teamMark(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong>${teamBadges(match.away)}</div>
       <div class="venue compact">${deco('📍')} ${escapeHtml(match.venue?.display_name || 'Sede por definir')}</div>
     </article>`;
 }
@@ -2110,7 +2130,7 @@ async function renderAveragesTableMode(ctx) {
     return `
       <tr class="${['standings-main', zone ? zoneClass(zone.code) : ''].filter(Boolean).join(' ')}">
         <td>${pos}${zone ? `<span class="sr-only"> (${escapeHtml(zone.label)})</span>` : ''}</td>
-        <td class="col-team"><strong>${teamFlag(row)} <span class="team-label">${escapeHtml(row.team_name || '-')}</span></strong>${used && used < seasons ? ` <small class="avg-seasons">${num(used)} temp.</small>` : ''}</td>
+        <td class="col-team"><strong>${teamMark(row)} <span class="team-label">${escapeHtml(row.team_name || '-')}</span></strong>${used && used < seasons ? ` <small class="avg-seasons">${num(used)} temp.</small>` : ''}</td>
         <td>${num(row.played)}</td>
         <td>${num(row.points)}</td>
         <td class="col-pts"><strong>${escapeHtml(averageValue(row).toFixed(3))}</strong></td>
@@ -3924,7 +3944,7 @@ function lineupPitchHtml(side, team) {
   }
   return `
     <div class="lineup-team">
-      <h4>${teamFlag(team)} ${escapeHtml(team?.display_name || '')}${side.formation ? ` <small>${escapeHtml(side.formation)}</small>` : ''}</h4>
+      <h4>${teamMark(team)} ${escapeHtml(team?.display_name || '')}${side.formation ? ` <small>${escapeHtml(side.formation)}</small>` : ''}</h4>
       ${main}
       ${bench.length ? `<details class="lineup-bench"><summary>Suplentes (${bench.length})</summary><div class="lineup-list">${bench.map(playerChip).join('')}</div></details>` : ''}
     </div>`;
@@ -4068,9 +4088,9 @@ function matchDetailHtml(detail) {
         <span class="stage-chip">${escapeHtml(meta || 'Partido')}</span>
         <h2 id="md-title" class="sr-only">${escapeHtml(`${home.display_name} vs ${away.display_name}`)}</h2>
         <div class="teams-row">
-          <div class="team-side"><div class="flag">${teamFlag(home)}</div><div class="name">${escapeHtml(home.display_name)}</div></div>
+          <div class="team-side"><div class="flag">${teamMark(home)}</div><div class="name">${escapeHtml(home.display_name)}</div></div>
           ${matchScore(m)}
-          <div class="team-side"><div class="flag">${teamFlag(away)}</div><div class="name">${escapeHtml(away.display_name)}</div></div>
+          <div class="team-side"><div class="flag">${teamMark(away)}</div><div class="name">${escapeHtml(away.display_name)}</div></div>
         </div>
         <div class="md-status ${statusClass(m.status)}">${matchTimeHtml(m)}</div>
       </header>
