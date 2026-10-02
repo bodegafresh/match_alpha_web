@@ -3833,12 +3833,20 @@ function eventsTimelineHtml(events) {
   }).join('')}</ol>`;
 }
 
+// "12-abr 2025": head-to-head spans several seasons, so the year is always shown.
+function h2hDateLabel(value) {
+  const d = value ? new Date(value) : null;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  return `${dateLabel(value)} ${d.toLocaleDateString('es-CL', { year: 'numeric', timeZone: 'America/Santiago' })}`;
+}
+
 function h2hHtml(rows, match) {
   if (!rows?.length) return emptyState('Sin enfrentamientos previos registrados.');
   return `<div class="h2h-list">${rows.map((h) => `
     <div class="h2h-row">
-      <span class="h2h-date">${escapeHtml(dateLabel(h.kickoff_at))}</span>
-      <span class="h2h-teams">${escapeHtml(h.home_name || '')} <b>${num(h.home_score)}-${num(h.away_score)}</b> ${escapeHtml(h.away_name || '')}</span>
+      <span class="h2h-date">${escapeHtml(h2hDateLabel(h.kickoff_at))}</span>
+      <span class="h2h-teams">${escapeHtml(h.home_name || '')} <b>${num(h.home_score)}-${num(h.away_score)}</b> ${escapeHtml(h.away_name || '')}
+        <small class="h2h-comp">${escapeHtml([h.competition_name, h.season_label].filter(Boolean).join(' · '))}</small></span>
       ${resultChip(h.result_for_home)}
     </div>`).join('')}</div>
     <p class="hint">Resultado desde el punto de vista de ${escapeHtml(match.home?.display_name || 'el local')}.</p>`;
