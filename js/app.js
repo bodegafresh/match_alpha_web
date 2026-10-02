@@ -369,7 +369,7 @@ function applyCompetitionLayout() {
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
   });
-  if (state.view !== 'identity' && !navByView[state.view]) {
+  if (!isAdminView(state.view) && !navByView[state.view]) {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
@@ -3209,6 +3209,12 @@ async function render(options = {}) {
     await loadIdentityQueue(adminState.offset || 0);
     return;
   }
+  if (state.view === 'ops') {
+    setStatus('Admin · operación');
+    if (options.silent) return;
+    await loadOpsView();
+    return;
+  }
   try {
     await ensureLayout(renderOptions);
     updateTabs();
@@ -3280,7 +3286,7 @@ $('#refresh-btn').addEventListener('click', () => {
 
 function refreshSilently() {
   if (document.hidden) return;
-  if (state.view === 'identity') return;
+  if (isAdminView(state.view)) return;
   if (!state.layout) return;
   const quantPaths = { ev: 'ev/opportunities', model: 'model/diagnostics', stats: 'calibration/summary' };
   const paths = quantPaths[state.view]
@@ -4018,6 +4024,7 @@ window.addEventListener('offline', () => setOfflineBanner(true));
 
 const ADMIN_KEY_STORAGE = 'ma_admin_internal_key';
 const ADMIN_ENABLED = new URLSearchParams(location.search).get('admin') === '1';
+function isAdminView(view) { return view === 'identity' || view === 'ops'; }
 const adminState = { items: [], offset: 0, total: null, hasMore: false, nextOffset: null, busy: false, msg: '' };
 
 function adminKey() { try { return sessionStorage.getItem(ADMIN_KEY_STORAGE) || ''; } catch { return ''; } }
@@ -4055,7 +4062,7 @@ async function adminFetch(path, { method = 'GET', params = {}, body = null } = {
 function renderAdminKeyPrompt(message = '') {
   root.innerHTML = `
     <form class="login-box admin-key-box" id="admin-key-form" autocomplete="off">
-      <h2>Identidad · acceso admin</h2>
+      <h2>Admin · acceso</h2>
       <p>Ingresa la <strong>clave interna</strong>. Se guarda solo en esta pestaña (sessionStorage) y se envía únicamente a /admin/*.</p>
       <label for="admin-key-input" class="sr-only">Clave interna</label>
       <input id="admin-key-input" type="password" placeholder="Clave interna" autocomplete="off" spellcheck="false">
@@ -4067,7 +4074,7 @@ function renderAdminKeyPrompt(message = '') {
     const value = $('#admin-key-input').value.trim();
     if (!value) return;
     setAdminKey(value);
-    loadIdentityQueue(0);
+    if (state.view === 'ops') loadOpsView(); else loadIdentityQueue(0);
   });
   $('#admin-key-input').focus();
 }
@@ -4198,9 +4205,11 @@ async function decideIdentityItem(id, act) {
   if (state.view === 'identity') renderIdentityQueue();
 }
 
-function openIdentityAdmin() {
+function openIdentityAdmin() { openAdminView('identity'); }
+
+function openAdminView(view) {
   closeMoreSheet();
-  state.view = 'identity';
+  state.view = view;
   document.querySelectorAll('.tab').forEach((t) => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
   document.querySelectorAll('.bottom-tab, .more-item').forEach((t) => { t.classList.remove('active'); t.removeAttribute('aria-current'); });
   hideDateFilterBar();
@@ -4208,17 +4217,135 @@ function openIdentityAdmin() {
   render();
 }
 
+// ─── Admin: operación (ops incidents + health; hidden; ?admin=1, same key/session rules) ─────
+const opsState = { incidents: [], health: null, filter: 'OPEN', mode: 'light', msg: '', busy: false };
+const OPS_SEV_CLASS = { CRITICAL: 'ops-sev--crit', WARN: 'ops-sev--warn', INFO: 'ops-sev--info' };
+
+function opsPlain(text) {
+  // check messages only use <b>; strip tags and render as escaped text
+  return escapeHtml(String(text || '').replace(/<\/?b>/g, ''));
+}
+
+function opsWhen(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function opsCard(label, value, hint = '', tone = '') {
+  return `<div class="ops-card ${tone}"><div class="ops-card-label">${escapeHtml(label)}</div><div class="ops-card-value">${escapeHtml(String(value))}</div>${hint ? `<div class="ops-card-hint">${escapeHtml(hint)}</div>` : ''}</div>`;
+}
+
+function opsIncidentRow(it) {
+  const sev = String(it.severity || 'INFO').toUpperCase();
+  const details = it.details && typeof it.details === 'object' ? it.details : {};
+  const open = it.status === 'OPEN';
+  return `
+    <article class="ops-inc ${open ? '' : 'ops-inc--resolved'}" data-id="${escapeHtml(String(it.id))}">
+      <header class="ops-inc-head">
+        <span class="ops-sev ${OPS_SEV_CLASS[sev] || ''}">${escapeHtml(sev)}</span>
+        <strong class="ops-inc-title">${escapeHtml(it.title || it.dedupe_key || '')}</strong>
+        <span class="chip chip--muted">${escapeHtml(it.status || '')}${it.acked_at ? ' · ack' : ''}</span>
+      </header>
+      ${details.message ? `<p class="ops-inc-msg">${opsPlain(details.message)}</p>` : ''}
+      ${details.action ? `<p class="ops-inc-action">👉 ${escapeHtml(details.action)}</p>` : ''}
+      <p class="ops-inc-meta">${escapeHtml(it.check_name || '')} · visto ${escapeHtml(opsWhen(it.last_seen))} · ×${num(it.count, 1)} · desde ${escapeHtml(opsWhen(it.first_seen))}${it.resolved_at ? ` · resuelto ${escapeHtml(opsWhen(it.resolved_at))}` : ''}</p>
+      ${open && !it.acked_at ? '<div class="ops-inc-actions"><button type="button" class="idq-btn idq-btn--skip" data-ack="1">Ack (silenciar)</button></div>' : ''}
+    </article>`;
+}
+
+function renderOpsView() {
+  const h = opsState.health || {};
+  const inc = h.incidents || null;
+  const counts = h.counts || {};
+  const db = h.db_errors_1h || {};
+  const routes = Array.isArray(h.routes) ? h.routes : [];
+  const findings = Array.isArray(h.findings) ? h.findings : [];
+  const cards = [
+    opsCard('Incidentes abiertos', inc ? num(inc.open) : '—', inc ? `🚨 ${num(inc.open_critical)} · ⚠️ ${num(inc.open_warn)}` : 'migración 046 pendiente', inc && num(inc.open_critical) ? 'ops-card--crit' : ''),
+    opsCard('Hallazgos ahora', findings.length, `🚨 ${num(counts.CRITICAL)} · ⚠️ ${num(counts.WARN)} · ℹ️ ${num(counts.INFO)} (${opsState.mode})`, num(counts.CRITICAL) ? 'ops-card--crit' : ''),
+    opsCard('Notificados 24 h', inc ? num(inc.notified_24h) : '—', inc ? `resueltos ${num(inc.resolved_24h)}` : ''),
+    opsCard('Errores DB 1 h', num(db.total), Object.entries(db.by_kind || {}).map(([k, v]) => `${k} ${v}`).join(' · ')),
+  ].join('');
+  const slow = routes.slice(0, 5).map((r) => `<li><span class="ops-route">${escapeHtml(r.route)}</span> p95 ${num(r.p95_ms)} ms · n ${num(r.count)}${num(r.errors_5xx) ? ` · 5xx ${num(r.errors_5xx)}` : ''}</li>`).join('');
+  const checkErrors = Object.keys(h.check_errors || {});
+  const now = findings.slice(0, 12).map((f) => `<li><span class="ops-sev ${OPS_SEV_CLASS[f.severity] || ''}">${escapeHtml(f.severity)}</span> ${escapeHtml(f.title)}</li>`).join('');
+  root.innerHTML = `
+    <div class="idq-view ops-view">
+      <div class="idq-toolbar">
+        <h2 class="section-title">Operación</h2>
+        <button type="button" class="idq-btn idq-btn--skip" id="ops-reload">Recargar</button>
+        <button type="button" class="idq-btn idq-btn--skip" id="ops-full">${opsState.mode === 'full' ? 'Chequeo liviano' : 'Chequeo completo'}</button>
+        <button type="button" class="idq-btn idq-btn--skip" id="ops-filter">${opsState.filter === 'OPEN' ? 'Ver todos' : 'Solo abiertos'}</button>
+        <button type="button" class="idq-btn idq-btn--skip" id="ops-identity">Identidad</button>
+      </div>
+      ${opsState.msg ? `<p class="idq-msg" role="status">${escapeHtml(opsState.msg)}</p>` : ''}
+      <div class="ops-cards">${cards}</div>
+      ${checkErrors.length ? `<p class="idq-warn">Checks con error: ${escapeHtml(checkErrors.join(', '))}</p>` : ''}
+      ${now ? `<section class="ops-section"><h3>Hallazgos del chequeo (sin enviar)</h3><ul class="ops-list">${now}</ul></section>` : ''}
+      ${slow ? `<section class="ops-section"><h3>Rutas más lentas (1 h, este worker)</h3><ul class="ops-list">${slow}</ul></section>` : ''}
+      <section class="ops-section"><h3>Incidentes ${opsState.filter === 'OPEN' ? 'abiertos' : '(todos)'}</h3>
+        ${opsState.incidents.length ? opsState.incidents.map(opsIncidentRow).join('') : '<p class="empty-state">Sin incidentes.</p>'}
+      </section>
+    </div>`;
+  $('#ops-reload')?.addEventListener('click', () => loadOpsView());
+  $('#ops-full')?.addEventListener('click', () => { opsState.mode = opsState.mode === 'full' ? 'light' : 'full'; loadOpsView(); });
+  $('#ops-filter')?.addEventListener('click', () => { opsState.filter = opsState.filter === 'OPEN' ? '' : 'OPEN'; loadOpsView(); });
+  $('#ops-identity')?.addEventListener('click', () => openAdminView('identity'));
+  root.querySelectorAll('.ops-inc [data-ack]').forEach((button) => {
+    button.addEventListener('click', () => ackOpsIncident(button.closest('.ops-inc').dataset.id));
+  });
+}
+
+async function loadOpsView() {
+  if (!adminKey()) { renderAdminKeyPrompt(); return; }
+  root.innerHTML = skeletonCards(4);
+  opsState.msg = '';
+  const [health, incidents] = await Promise.allSettled([
+    adminFetch('admin/ops/health', { params: { mode: opsState.mode } }),
+    adminFetch('admin/ops/incidents', { params: { status: opsState.filter, limit: 50 } }),
+  ]);
+  const authError = [health, incidents].find((r) => r.status === 'rejected' && r.reason?.name === 'AdminAuth');
+  if (authError) { renderAdminKeyPrompt(authError.reason.message); return; }
+  opsState.health = health.status === 'fulfilled' ? health.value : null;
+  opsState.incidents = incidents.status === 'fulfilled' && Array.isArray(incidents.value.items) ? incidents.value.items : [];
+  const errors = [health, incidents].filter((r) => r.status === 'rejected').map((r) => r.reason?.message || 'error');
+  if (errors.length) opsState.msg = `Error: ${errors.join(' · ')}`;
+  if (state.view === 'ops') renderOpsView();
+}
+
+async function ackOpsIncident(id) {
+  if (opsState.busy) return;
+  opsState.busy = true;
+  try {
+    await adminFetch(`admin/ops/incidents/${encodeURIComponent(id)}/ack`, { method: 'POST', body: { by: 'web-admin' } });
+    const it = opsState.incidents.find((x) => String(x.id) === String(id));
+    if (it) it.acked_at = new Date().toISOString();
+    opsState.msg = 'Incidente silenciado (ack). Se resolverá solo cuando el check pase.';
+  } catch (error) {
+    if (error.name === 'AdminAuth') { opsState.busy = false; renderAdminKeyPrompt(error.message); return; }
+    opsState.msg = `No se pudo hacer ack (${error.message}).`;
+  }
+  opsState.busy = false;
+  if (state.view === 'ops') renderOpsView();
+}
+
 (function mountAdminEntry() {
   if (!ADMIN_ENABLED) return;
   const refresh = document.getElementById('refresh-btn');
   if (!refresh) return;
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'icon-btn admin-entry';
-  button.id = 'admin-identity-entry';
-  button.textContent = 'Identidad';
-  button.addEventListener('click', openIdentityAdmin);
-  refresh.before(button);
+  [['admin-identity-entry', 'Identidad', 'identity'], ['admin-ops-entry', 'Operación', 'ops']].forEach(([id, label, view]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'icon-btn admin-entry';
+    button.id = id;
+    button.textContent = label;
+    button.addEventListener('click', () => openAdminView(view));
+    refresh.before(button);
+  });
+  // Deep link from Telegram alerts: ?admin=1&view=ops
+  if (new URLSearchParams(location.search).get('view') === 'ops') state.view = 'ops';
 })();
 
 
