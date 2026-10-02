@@ -369,7 +369,9 @@ function applyCompetitionLayout() {
     button.hidden = !item;
     if (item?.label) button.textContent = item.label;
   });
-  if (!isAdminView(state.view) && !navByView[state.view]) {
+  // Fase H: views registered by js/picks.js / js/push.js (window.MA_VIEWS) are not layout-driven.
+  const extView = Boolean(window.MA_VIEWS && Object.prototype.hasOwnProperty.call(window.MA_VIEWS, state.view));
+  if (!isAdminView(state.view) && !navByView[state.view] && !extView) {
     const defaultView = layoutKeyToView(state.layout?.ui?.default_view || navigationItems()[0]?.key || 'matches');
     state.view = navByView[defaultView] ? defaultView : layoutKeyToView(navigationItems()[0]?.key || 'matches');
   }
@@ -385,7 +387,7 @@ function applyCompetitionLayout() {
   }
 }
 
-const KNOCKOUT_VIEW_TYPES = ['BRACKET_ROUND', 'TWO_LEG_TIE'];
+const KNOCKOUT_VIEW_TYPES = ['BRACKET_ROUND', 'TWO_LEG_TIE', 'PLAYOFF_BRACKET'];
 
 function knockoutStageDefinitions() {
   const layoutStages = state.layout?.stages || [];
@@ -404,6 +406,9 @@ function knockoutStageDefinitions() {
         // Slots in the bracket = ties, not matches.
         slots: legs > 1 ? Math.ceil(matchCount / legs) : matchCount,
         viewType,
+        // Phase G: format notes (single leg + ET/penalties, best-of-N series), seeding and origins.
+        rules: stage.rules || {},
+        origins: Array.isArray(stage.origins) ? stage.origins : [],
       };
     })
     .filter((stage) => stage.key);
@@ -1080,6 +1085,16 @@ async function renderLeagueTableMode(ctx) {
 
 async function renderGroupTablesMode(ctx) {
   const groups = await fetchStandingsGroups(ctx.options);
+  // Phase G: several group stages (Argentina Apertura / Clausura zones) → stage selector.
+  const groupStages = tableStageOptions('GROUP_TABLES');
+  if (groupStages.length > 1) {
+    if (!groupStages.some((o) => o.key === state.tableStage)) state.tableStage = groupStages[0].key;
+    const sel = groupStages.find((o) => o.key === state.tableStage) || groupStages[0];
+    const stageGroups = groups.filter((g) => g.stage_code === sel.key);
+    setStatus('Torneo', `${stageGroups.length} grupos`);
+    return `${subTabsHtml(groupStages, sel.key, 'data-table-stage', 'Etapa')}${
+      renderGroupTablesView(stageGroups, sel.stage?.rules || {}) || emptyState('No hay grupos disponibles.')}`;
+  }
   const stage = stageDefinitionsByViewType('GROUP_TABLES')[0];
   const layoutStageDef = stage ? layoutStage(stage.key) : null;
   const stageGroups = groupsForStage(groups, layoutStageDef);
@@ -1746,8 +1761,8 @@ function tieCard(tie) {
   const agg = tie.aggregate;
   return `
     <article class="card bracket-card tie-card fade-in">
-      <div class="bracket-team">${teamFlag(tie.teamA)} <strong>${escapeHtml(teamName(tie.teamA))}</strong></div>
-      <div class="bracket-team">${teamFlag(tie.teamB)} <strong>${escapeHtml(teamName(tie.teamB))}</strong></div>
+      <div class="bracket-team">${teamFlag(tie.teamA)} <strong>${escapeHtml(teamName(tie.teamA))}</strong>${teamBadges(tie.teamA)}</div>
+      <div class="bracket-team">${teamFlag(tie.teamB)} <strong>${escapeHtml(teamName(tie.teamB))}</strong>${teamBadges(tie.teamB)}</div>
       <div class="tie-legs">${tie.legs.map(legRow).join('')}</div>
       <div class="tie-aggregate">
         <span>Global <strong>${agg ? `${agg.a}-${agg.b}` : '—'}</strong>${tie.penalties ? ` · Pen ${tie.penalties.home}-${tie.penalties.away}` : ''}</span>
@@ -1766,13 +1781,13 @@ function tieBracketNode(tie) {
     <div class="bracket-node${live ? ' bracket-node--live' : ''}">
       <div class="bracket-node-team${aWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(tie.teamA)}</span>
-        <span class="bracket-node-name">${escapeHtml(teamName(tie.teamA))}</span>
+        <span class="bracket-node-name">${escapeHtml(teamName(tie.teamA))}</span>${teamBadges(tie.teamA)}
         ${agg ? `<span class="bracket-node-score${aWin ? ' bracket-node-score--win' : ''}">${agg.a}</span>` : ''}
       </div>
       <div class="bracket-node-divider"></div>
       <div class="bracket-node-team${bWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(tie.teamB)}</span>
-        <span class="bracket-node-name">${escapeHtml(teamName(tie.teamB))}</span>
+        <span class="bracket-node-name">${escapeHtml(teamName(tie.teamB))}</span>${teamBadges(tie.teamB)}
         ${agg ? `<span class="bracket-node-score${bWin ? ' bracket-node-score--win' : ''}">${agg.b}</span>` : ''}
       </div>
       <div class="bracket-node-agg">Global${tie.penalties ? ` · pen ${tie.penalties.home}-${tie.penalties.away}` : ''}</div>
@@ -1788,6 +1803,7 @@ async function renderBracketMode(ctx) {
   if (!stages.length) return renderMatchList(ctx);
   const data = await cached('web/knockout', {}, 90000, ctx.options);
   const matches = data.matches || [];
+  await loadBracketBadges(stages, ctx.options);
   setStatus('Torneo', matches.length ? `${matches.length} partidos` : 'Llaves por definir');
   const byStage = matches.reduce((acc, match) => {
     const key = knockoutStageKey(match);
@@ -1884,13 +1900,13 @@ function bracketNodeCard(match) {
       ${dateStr ? `<div class="bracket-node-date">${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} CL</div>` : ''}
       <div class="bracket-node-team${homeWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(match.home)}</span>
-        <span class="bracket-node-name">${escapeHtml(match.home?.display_name || match.home?.slot_label || '?')}</span>
+        <span class="bracket-node-name">${escapeHtml(match.home?.display_name || match.home?.slot_label || '?')}</span>${teamBadges(match.home)}
         ${hasScore ? `<span class="bracket-node-score${homeWin ? ' bracket-node-score--win' : ''}">${num(match.home_score)}</span>` : ''}
       </div>
       <div class="bracket-node-divider"></div>
       <div class="bracket-node-team${awayWin ? ' bracket-node-team--winner' : ''}">
         <span class="bracket-node-flag">${teamFlag(match.away)}</span>
-        <span class="bracket-node-name">${escapeHtml(match.away?.display_name || match.away?.slot_label || '?')}</span>
+        <span class="bracket-node-name">${escapeHtml(match.away?.display_name || match.away?.slot_label || '?')}</span>${teamBadges(match.away)}
         ${hasScore ? `<span class="bracket-node-score${awayWin ? ' bracket-node-score--win' : ''}">${num(match.away_score)}</span>` : ''}
       </div>
     </div>`;
@@ -1911,6 +1927,7 @@ function knockoutColumn(stage, matches) {
   return `
     <section class="knockout-column">
       <header><h2>${escapeHtml(stage.title)}</h2><span>${escapeHtml(label)}</span></header>
+      ${stageFormatNote(stage)}
       <div class="knockout-list">${cards}</div>
     </section>`;
 }
@@ -1953,9 +1970,9 @@ function knockoutCard(match) {
   return `
     <article class="card bracket-card fade-in"${matchDetailAttrs(match)}>
       <div class="bracket-top"><span>${escapeHtml(match.match_number ? `Partido ${match.match_number}` : 'Partido')}</span><b>${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</b></div>
-      <div class="bracket-team">${teamFlag(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong></div>
+      <div class="bracket-team">${teamFlag(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong>${teamBadges(match.home)}</div>
       <div class="bracket-vs">${matchScore(match)}</div>
-      <div class="bracket-team">${teamFlag(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong></div>
+      <div class="bracket-team">${teamFlag(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong>${teamBadges(match.away)}</div>
       <div class="venue compact">${deco('📍')} ${escapeHtml(match.venue?.display_name || 'Sede por definir')}</div>
     </article>`;
 }
@@ -2047,6 +2064,118 @@ async function renderMatchListMode(ctx) {
   return renderMatchList({ ...ctx, stageCode: ctx.stageCode || stage?.key, stageTitle: ctx.stageTitle || stage?.title });
 }
 
+// ─── Phase G: derived tables (acumulada / promedios), seeds, "viene de" ─────────
+
+function derivedStage(viewType) {
+  return (state.layout?.stages || []).find((s) => String(s.view_type || '').toUpperCase() === viewType) || null;
+}
+
+function derivedRows(groups, stage) {
+  const rows = groups.filter((g) => stage && g.stage_code === stage.stage_code).flatMap((g) => g.standings || []);
+  return [...rows].sort((a, b) => num(a.position, 999) - num(b.position, 999));
+}
+
+async function renderAggregateTableMode(ctx) {
+  const stage = derivedStage('AGGREGATE_TABLE');
+  const rows = derivedRows(await fetchStandingsGroups(ctx.options), stage);
+  if (!rows.length) return emptyState('La tabla acumulada se calcula tras el próximo refresco de posiciones.');
+  const zones = zonesFromRules(stage?.rules || {}, rows.length, 'AGGREGATE_TABLE');
+  const sources = (stage?.rules?.aggregate_of || []).map((code) => layoutStage(code)?.stage_label || code);
+  setStatus('Torneo', 'Tabla acumulada');
+  return `
+    <section class="group-block fade-in">
+      <h2 class="section-title">${escapeHtml(stage?.stage_label || 'Tabla acumulada')}</h2>
+      ${sources.length ? `<p class="derived-note">Suma de ${escapeHtml(sources.join(' + '))}</p>` : ''}
+      ${_standingsTable(rows, zones)}
+      ${zoneLegendHtml(zones)}
+    </section>`;
+}
+
+function averageValue(row) {
+  const avg = Number(row?.derived?.average);
+  return Number.isFinite(avg) ? avg : (num(row.played) ? num(row.points) / num(row.played) : 0);
+}
+
+async function renderAveragesTableMode(ctx) {
+  const stage = derivedStage('AVERAGES_TABLE');
+  const rows = derivedRows(await fetchStandingsGroups(ctx.options), stage);
+  if (!rows.length) return emptyState('La tabla de promedios se calcula tras el próximo refresco de posiciones.');
+  const zones = zonesFromRules(stage?.rules || {}, rows.length, 'AVERAGES_TABLE');
+  const seasons = num(stage?.rules?.averages?.seasons, 3) || 3;
+  setStatus('Torneo', 'Promedios');
+  const body = rows.map((row, i) => {
+    const pos = num(row.position, i + 1) || i + 1;
+    const zone = zoneForPosition(zones, pos);
+    const used = num(row.derived?.seasons_used);
+    return `
+      <tr class="${['standings-main', zone ? zoneClass(zone.code) : ''].filter(Boolean).join(' ')}">
+        <td>${pos}${zone ? `<span class="sr-only"> (${escapeHtml(zone.label)})</span>` : ''}</td>
+        <td class="col-team"><strong>${teamFlag(row)} <span class="team-label">${escapeHtml(row.team_name || '-')}</span></strong>${used && used < seasons ? ` <small class="avg-seasons">${num(used)} temp.</small>` : ''}</td>
+        <td>${num(row.played)}</td>
+        <td>${num(row.points)}</td>
+        <td class="col-pts"><strong>${escapeHtml(averageValue(row).toFixed(3))}</strong></td>
+      </tr>`;
+  }).join('');
+  return `
+    <section class="group-block fade-in">
+      <h2 class="section-title">${escapeHtml(stage?.stage_label || 'Promedios')}</h2>
+      <p class="derived-note">Puntos por partido de las últimas ${num(seasons)} temporadas (ascendidos: solo las jugadas).</p>
+      <div class="card table-card standings-card">
+        <table class="standings-table averages-table">
+          <thead><tr><th scope="col">#</th><th scope="col">Equipo</th><th scope="col" title="Partidos jugados">PJ</th><th scope="col" title="Puntos">Pts</th><th scope="col" title="Promedio">Prom.</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      ${zoneLegendHtml(zones)}
+    </section>`;
+}
+
+// team_id → { seed, origin } for the knockout view (seeds from rules.seeding, origins from layout).
+async function loadBracketBadges(stages, options) {
+  const badges = new Map();
+  for (const stage of stages) {
+    for (const origin of stage.origins || []) {
+      if (origin?.team_id) badges.set(String(origin.team_id), { ...(badges.get(String(origin.team_id)) || {}), origin: String(origin.label || '') });
+    }
+  }
+  const seedStage = stages.map((s) => s.rules?.seeding?.from_stage).find(Boolean);
+  if (seedStage) {
+    try {
+      const groups = await fetchStandingsGroups(options);
+      const wanted = new Set((stages.find((s) => s.rules?.seeding)?.rules?.seeding?.positions || []).map(Number));
+      for (const row of groups.filter((g) => g.stage_code === seedStage).flatMap((g) => g.standings || [])) {
+        const pos = num(row.position);
+        if (!row.team_id || !pos || (wanted.size && !wanted.has(pos))) continue;
+        badges.set(String(row.team_id), { ...(badges.get(String(row.team_id)) || {}), seed: pos });
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+    }
+  }
+  state.bracketBadges = badges;
+}
+
+function teamBadges(team) {
+  const id = String(team?.team_id || team?.id || '');
+  const badge = id && state.bracketBadges ? state.bracketBadges.get(id) : null;
+  if (!badge) return '';
+  const seed = badge.seed ? `<span class="seed-badge" title="Sembrado ${num(badge.seed)}">${num(badge.seed)}</span>` : '';
+  const origin = badge.origin ? `<span class="origin-badge" title="Viene de: ${escapeHtml(badge.origin)}">${escapeHtml(badge.origin)}</span>` : '';
+  return ` ${seed}${origin}`;
+}
+
+function stageFormatNote(stage) {
+  const rules = stage?.rules || {};
+  const notes = [];
+  if (rules.series === 'BEST_OF_3') notes.push('Serie al mejor de 3');
+  else if (num(stage?.legs) > 1) notes.push('Ida y vuelta');
+  else if (rules.single_leg || num(stage?.legs) === 1) notes.push('Partido único');
+  if (rules.extra_time && num(stage?.legs) <= 1 && rules.series !== 'BEST_OF_3') notes.push('alargue');
+  if (rules.penalties) notes.push('penales');
+  if (rules.seeding) notes.push('sembrados por tabla');
+  return notes.length ? `<p class="stage-format-note">${escapeHtml(notes.join(' · '))}</p>` : '';
+}
+
 // Registry keyed by tournament_views[].render_mode and stages[].view_type (F3.1).
 const RENDERERS = {
   GROUP_TABLES: renderGroupTablesMode,
@@ -2056,6 +2185,9 @@ const RENDERERS = {
   BRACKET: renderBracketMode,
   BRACKET_ROUND: renderBracketMode,
   TWO_LEG_TIE: renderBracketMode,
+  PLAYOFF_BRACKET: renderBracketMode,
+  AGGREGATE_TABLE: renderAggregateTableMode,
+  AVERAGES_TABLE: renderAveragesTableMode,
   QUALIFICATION_SUMMARY: renderQualificationMode,
   GENERIC: renderGenericTable,
 };
@@ -2064,7 +2196,7 @@ function resolveRenderer(view) {
   const mode = String(view?.render_mode || view?.view_type || '').toUpperCase();
   if (RENDERERS[mode]) return RENDERERS[mode];
   // Legacy keys without a render_mode.
-  const byKey = { groups: 'GROUP_TABLES', table: 'LEAGUE_TABLE', fixtures: 'MATCH_LIST', knockout: 'BRACKET', qualified: 'QUALIFICATION_SUMMARY' }[view?.key];
+  const byKey = { groups: 'GROUP_TABLES', table: 'LEAGUE_TABLE', fixtures: 'MATCH_LIST', knockout: 'BRACKET', qualified: 'QUALIFICATION_SUMMARY', aggregate: 'AGGREGATE_TABLE', averages: 'AVERAGES_TABLE' }[view?.key];
   return RENDERERS[byKey] || renderGenericTable;
 }
 
@@ -3226,6 +3358,8 @@ async function render(options = {}) {
     else if (state.view === 'model') { hideDateFilterBar(); await renderModel(renderOptions); }
     else if (state.view === 'stats') { hideDateFilterBar(); await renderStats(renderOptions); }
     else if (state.view === 'news') { hideDateFilterBar(); await renderNews(renderOptions); }
+    // Fase H: views from js/picks.js / js/push.js (window.MA_VIEWS)
+    else if (window.MA_VIEWS && Object.prototype.hasOwnProperty.call(window.MA_VIEWS, state.view)) { hideDateFilterBar(); await window.MA_VIEWS[state.view](renderOptions); }
     else await renderToday(renderOptions);
   } catch (error) {
     if (error.name === 'AbortError' || seq !== state.renderSeq) return;
@@ -3417,7 +3551,8 @@ const COMPETITION_TYPE_LABELS = {
   LEAGUE: 'Ligas',
   DOMESTIC_LEAGUE: 'Ligas',
   CUP: 'Copas',
-  DOMESTIC_CUP: 'Copas',
+  DOMESTIC_CUP: 'Copas nacionales',
+  INTERNATIONAL_CUP: 'Selecciones',
 };
 
 function catalogSlug(entry) {
@@ -3511,10 +3646,11 @@ function buildLeaguePickerDropdown(catalog) {
 
 function buildLeaguePickerGroups(catalog) {
   if (catalog.source === 'api') {
-    // Group by competition_type, then order by region/name. Icons come from the catalog.
+    // Group by domain_type (Phase G: ligas / copas nacionales / copas internacionales / selecciones),
+    // falling back to competition_type, then order by region/name. Icons come from the catalog.
     const groups = new Map();
     for (const comp of catalog.entries) {
-      const label = catalogTypeLabel(comp.competition_type || comp.domain_type);
+      const label = catalogTypeLabel(comp.domain_type || comp.competition_type);
       if (!groups.has(label)) groups.set(label, []);
       groups.get(label).push(comp);
     }

@@ -15,7 +15,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261002h2h">
+  <link rel="stylesheet" href="css/styles.css?v=20261002gh">
+  <link rel="stylesheet" href="css/picks.css?v=20261002gh">
 </head>
 <body>
   <header class="topbar">
@@ -69,6 +70,8 @@
     <button class="more-item" data-view="elo" type="button"><span aria-hidden="true">📈</span>ELO</button>
     <button class="more-item" data-view="model" type="button"><span aria-hidden="true">🧠</span>Modelo</button>
     <button class="more-item" data-view="stats" type="button"><span aria-hidden="true">📊</span>Stats</button>
+    <button class="more-item" data-view="picks-history" type="button"><span aria-hidden="true">🧾</span>Historial</button>
+    <button class="more-item" data-view="alerts" type="button"><span aria-hidden="true">🔔</span>Alertas</button>
   </div>
 
   <template id="login-template">
@@ -82,8 +85,13 @@
     </form>
   </template>
 
-  <script src="js/config.js?v=20261002h2h"></script>
+  <script src="js/config.js?v=20261002gh"></script>
   <!-- Chart.js is lazy-loaded by js/app.js (loadChartJs) only when the Stats view opens. -->
-  <script src="js/app.js?v=20261002h2h"></script>
+  <script src="js/app.js?v=20261002gh"></script>
+  <!-- Fase H: historial de picks, alertas push, aviso legal (views registered in window.MA_VIEWS) -->
+  <script src="js/csv.js?v=20261002gh"></script>
+  <script src="js/picks.js?v=20261002gh"></script>
+  <script src="js/push.js?v=20261002gh"></script>
+  <script src="js/legal.js?v=20261002gh"></script>
 </body>
 </html>
