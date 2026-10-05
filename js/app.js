@@ -2180,7 +2180,7 @@ function teamBadges(team) {
   const badge = id && state.bracketBadges ? state.bracketBadges.get(id) : null;
   if (!badge) return '';
   const seed = badge.seed ? `<span class="seed-badge" title="Sembrado ${num(badge.seed)}">${num(badge.seed)}</span>` : '';
-  const origin = badge.origin ? `<span class="origin-badge" title="Viene de: ${escapeHtml(badge.origin)}">${escapeHtml(badge.origin)}</span>` : '';
+  const origin = badge.origin ? `<span class="origin-badge" title="Viene de: ${escapeHtml(badge.origin)}" aria-label="Viene de: ${escapeHtml(badge.origin)}">${escapeHtml(badge.origin)}</span>` : '';
   return ` ${seed}${origin}`;
 }
 
