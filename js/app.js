@@ -2644,7 +2644,7 @@ function evSummaryBar(opportunities, blocked) {
   return `<div class="ev-summary-bar">${cards.map((c) => `
     <div class="metric-card ${c.cls}">
       <div class="metric-card__value">${escapeHtml(String(c.value))}</div>
-      <div class="metric-card__label">${escapeHtml(c.label)}</div>
+      <div class="metric-card__label">${escapeHtml(c.label)}${c.help ? ` ${metricHelp(c.help)}` : ''}</div>
     </div>`).join('')}</div>`;
 }
 
@@ -2998,16 +2998,19 @@ function initCalibrationChart(calibrationData) {
 
 function roiByEvChart(buckets) {
   const id = 'roi-ev-chart';
-  if (!buckets.length) return `<div class="chart-wrap">${quantEmptyState('📊', 'Sin datos', 'Se necesitan picks settled para calcular ROI por EV.')}</div>`;
+  if (!window.MA_STATS.roiByEvReadiness(buckets).points.length) return `<div class="chart-wrap">${quantEmptyState('📊', 'Sin datos', 'Se necesitan picks settled para calcular ROI por EV.')}</div>`;
   return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
 }
 
 function initRoiChart(buckets) {
   destroyChart('roi-ev-chart');
   const canvas = document.getElementById('roi-ev-chart');
-  if (!canvas || !buckets.length || typeof Chart === 'undefined') return;
-  const labels = buckets.map((b) => b.ev_bucket);
-  const roiData = buckets.map((b) => b.roi_pct ?? 0);
+  if (!canvas || typeof Chart === 'undefined') return;
+  // Buckets without a ROI are left out: a 0 bar would read as a real break-even result.
+  const points = window.MA_STATS.roiByEvReadiness(buckets).points;
+  if (!points.length) return;
+  const labels = points.map((b) => b.ev_bucket);
+  const roiData = points.map((b) => Number(b.roi_pct));
   const colors = roiData.map((v) => v >= 0 ? 'rgba(30,215,96,.6)' : 'rgba(255,99,117,.6)');
   new Chart(canvas, {
     type: 'bar',
@@ -3016,36 +3019,35 @@ function initRoiChart(buckets) {
   });
 }
 
-function picksByStatusChart(decisions) {
+function picksByStatusChart(summary) {
   const id = 'picks-donut-chart';
-  const counts = decisions.reduce((acc, d) => { acc[d.decision_status] = (acc[d.decision_status] || 0) + 1; return acc; }, {});
-  if (!Object.keys(counts).length) return `<div class="chart-wrap">${quantEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.')}</div>`;
+  if (!summary.decisionRows.length) return `<div class="chart-wrap">${quantEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.')}</div>`;
   return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
 }
 
-function initPicksDonut(decisions) {
+function initPicksDonut(summary) {
   destroyChart('picks-donut-chart');
   const canvas = document.getElementById('picks-donut-chart');
-  if (!canvas || typeof Chart === 'undefined') return;
-  const counts = decisions.reduce((acc, d) => { acc[d.decision_status] = (acc[d.decision_status] || 0) + 1; return acc; }, {});
+  if (!canvas || typeof Chart === 'undefined' || !summary.decisionRows.length) return;
   const STATUS_COLORS = { BETTABLE: '#1ed760', PAPER_ONLY: '#f4c542', NO_EDGE: '#6f8399', BLOCKED: '#3d4f61' };
-  const labels = Object.keys(counts);
+  const rows = summary.decisionRows;
   new Chart(canvas, {
     type: 'doughnut',
-    data: { labels, datasets: [{ data: labels.map((l) => counts[l]), backgroundColor: labels.map((l) => STATUS_COLORS[l] || '#3d4f61'), borderWidth: 0 }] },
+    data: { labels: rows.map((r) => r.label), datasets: [{ data: rows.map((r) => r.count), backgroundColor: rows.map((r) => STATUS_COLORS[r.status] || '#3d4f61'), borderWidth: 0 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#9fb0c3', font: { size: 11 }, padding: 12 } } } },
   });
 }
 
 function statsKpiBar(calibration, buckets) {
   const latest = calibration[0] || {};
-  const totalROI = buckets.length ? buckets.reduce((s, b) => s + (b.roi_pct ?? 0) * (b.settled_count ?? 0), 0) / Math.max(1, buckets.reduce((s, b) => s + (b.settled_count ?? 0), 0)) : null;
+  // Same ROI as the summary card (buckets without a ROI are not averaged in as 0).
+  const totalROI = window.MA_STATS.performanceSummary({ calibration, buckets, clv: null }).roi;
   const cards = [
     { label: 'Brier Score', value: fmtNum(latest.brier_score, 4), cls: '' },
     { label: 'Log Loss', value: fmtNum(latest.log_loss, 4), cls: '' },
     { label: 'ECE', value: fmtNum(latest.ece, 4), cls: '' },
     { label: 'ROI papel prom.', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
-    { label: 'Muestra (n)', value: latest.sample_size ?? 0, cls: '' },
+    { label: 'Muestra Brier / LL / ECE', value: latest.sample_size ?? 0, cls: '', help: 'sample_calibration' },
   ];
   return `<div class="kpi-bar">${cards.map((c) => `
     <div class="metric-card ${c.cls}">
@@ -3057,7 +3059,7 @@ function statsKpiBar(calibration, buckets) {
 // F4.6: daily model metrics history (Brier, log-loss, ECE, CLV, paper ROI) — last 30 days.
 function metricsHistoryChart(series) {
   const id = 'metrics-history-chart';
-  if (!series.length) return `<div class="chart-wrap">${quantEmptyState('📈', 'Sin historial de métricas', 'La serie aparece cuando el loop diario registra métricas por competición.')}</div>`;
+  if (!window.MA_STATS.historyReadiness(series).show) return statsEmptyState('📈', 'Sin datos en los últimos 30 días', 'La serie aparece cuando el loop diario registra métricas con resultados (Brier, log-loss, ECE, CLV o ROI).');
   return `
     <div class="chart-wrap"><canvas id="${id}" aria-label="${escapeHtml('Historial diario de métricas del modelo')}" role="img"></canvas></div>
     <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI papel.')}</p>`;
@@ -3066,7 +3068,7 @@ function metricsHistoryChart(series) {
 function initMetricsHistoryChart(series) {
   destroyChart('metrics-history-chart');
   const canvas = document.getElementById('metrics-history-chart');
-  if (!canvas || !series.length || typeof Chart === 'undefined') return;
+  if (!canvas || !window.MA_STATS.historyReadiness(series).show || typeof Chart === 'undefined') return;
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const labels = series.map((p) => String(p.date || ''));
   const line = (label, key, color, axis, dash) => ({
@@ -3145,6 +3147,9 @@ const METRIC_HELP = {
   ece: 'Qué tan bien calibradas están las probabilidades. Menor es mejor.',
   clv: 'Compara la cuota obtenida con la cuota de cierre del mercado. Positivo es mejor.',
   roi: 'Ganancia por unidad apostada en modo papel (simulado).',
+  sample_settled: 'Decisiones del sistema (una por predicción y selección) cuyo partido ya tiene resultado. Cada métrica indica debajo su propio n.',
+  sample_calibration: 'Predicciones con resultado (una fila por selección: local, empate, visita) de la última calibración, de una liga y mercado. Brier, log-loss y ECE se calculan sobre ellas.',
+  decisions: 'Una decisión es la evaluación de una selección de un partido (p. ej. Local en 1X2). Estado y resultado son dimensiones distintas: cada decisión tiene uno de cada.',
 };
 
 function metricHelp(key) {
@@ -3164,6 +3169,12 @@ function sampleBadge(maturity) {
     </div>`;
 }
 
+// Empty state that tells "no observations" (NO_DATA) apart from "some, below the minimum" (INSUFFICIENT).
+function sampleEmptyState(icon, maturity, { noData, insufficient }) {
+  const [title, text] = maturity.status === 'NO_DATA' ? noData : insufficient;
+  return statsEmptyState(icon, title, text, maturity.status === 'NO_DATA' ? null : maturity);
+}
+
 // Reusable "not enough data yet" state for charts/sections that need a sample to mean anything.
 function statsEmptyState(icon, title, text, maturity) {
   return `
@@ -3181,16 +3192,17 @@ const fmtPctFrac = (v) => (v != null && !Number.isNaN(Number(v)) ? `${(Number(v)
 function performanceSummaryCard(summary) {
   const roiCls = summary.roi > 0 ? 'metric-card--ok' : summary.roi < 0 ? 'metric-card--danger' : '';
   const clvLabel = summary.clvDays ? `CLV (${summary.clvDays} días)` : 'CLV';
+  const nLine = (n, what) => (n == null ? '' : `<div class="metric-card__n">n = ${escapeHtml(String(n))} ${escapeHtml(what)}</div>`);
   return `
     <article class="card perf-summary">
       <header class="perf-summary__head">
         <h3>Rendimiento del modelo</h3>
-        <span class="perf-summary__n"><b>${escapeHtml(String(summary.settled))}</b> picks liquidados</span>
+        <span class="perf-summary__n"><b>${escapeHtml(String(summary.settled))}</b> decisiones con resultado ${metricHelp('sample_settled')}</span>
       </header>
       <div class="kpi-bar perf-summary__kpis">
-        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">ROI papel ${metricHelp('roi')}</div></div>
-        <div class="metric-card"><div class="metric-card__value">${summary.clv != null ? escapeHtml(fmtPctFrac(summary.clv)) : '—'}</div><div class="metric-card__label">${escapeHtml(clvLabel)} ${metricHelp('clv')}</div></div>
-        <div class="metric-card"><div class="metric-card__value">${escapeHtml(fmt4(summary.brier))}</div><div class="metric-card__label">Brier ${metricHelp('brier')}</div></div>
+        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">ROI papel ${metricHelp('roi')}</div>${nLine(summary.roiN, 'con stake')}</div>
+        <div class="metric-card"><div class="metric-card__value">${summary.clv != null ? escapeHtml(fmtPctFrac(summary.clv)) : '—'}</div><div class="metric-card__label">${escapeHtml(clvLabel)} ${metricHelp('clv')}</div>${nLine(summary.clvN, 'con cierre')}</div>
+        <div class="metric-card"><div class="metric-card__value">${escapeHtml(fmt4(summary.brier))}</div><div class="metric-card__label">Brier ${metricHelp('brier')}</div>${summary.brier != null ? nLine(summary.brierN, summary.brierScope ? `predicciones · ${summary.brierScope}` : 'predicciones') : ''}</div>
       </div>
       ${sampleBadge(summary.maturity)}
       ${summary.maturity.sufficient ? '' : '<p class="perf-summary__note">Resultados preliminares: todavía no son evidencia estadística concluyente.</p>'}
@@ -3295,16 +3307,29 @@ function aiImpactList(policies, track) {
   return `<div class="market-card-grid">${policies.map((p) => aiImpactCard(p, trackBy.get(p.competition) || {})).join('')}</div>`;
 }
 
-function picksStatusSection(decisions) {
-  const s = window.MA_STATS.pickStatusSummary(decisions);
-  if (!s.total) return quantEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.');
+function picksStatusSection(decisions, totals, limit) {
+  const s = window.MA_STATS.pickStatusSummary(decisions, totals, limit);
+  if (!s.total) return statsEmptyState('🍩', 'Sin decisiones', 'No hay decisiones registradas aún.');
+  const scope = s.source === 'all' ? `${s.total} decisiones en total` : `Últimas ${s.total} decisiones`;
   return `
-    <ul class="pick-status-list">
-      ${s.rows.map((r) => `<li><span>${deco(r.icon)} ${escapeHtml(r.label)}</span><b>${r.count}</b></li>`).join('')}
-      <li class="pick-status-list__sep"><span>${deco('⏳')} Pendientes de resultado</span><b>${s.pending}</b></li>
-      <li><span>${deco('✅')} Liquidados</span><b>${s.settled}</b></li>
-    </ul>
-    ${s.useDonut ? picksByStatusChart(decisions) : ''}`;
+    <p class="perf-summary__note">${escapeHtml(scope)} ${metricHelp('decisions')}</p>
+    <div class="pick-status-groups">
+      <div>
+        <h4 class="pick-status-groups__title">Decisión del sistema</h4>
+        <ul class="pick-status-list">
+          ${s.decisionRows.map((r) => `<li><span>${deco(r.icon)} ${escapeHtml(r.label)}</span><b>${r.count}</b></li>`).join('')}
+        </ul>
+      </div>
+      <div>
+        <h4 class="pick-status-groups__title">Resultado del partido</h4>
+        <ul class="pick-status-list">
+          <li><span>${deco('⏳')} Pendientes</span><b>${s.resolution.pending}</b></li>
+          <li><span>${deco('✅')} Liquidadas</span><b>${s.resolution.settled}</b></li>
+          ${s.resolution.other ? `<li><span>${deco('↩️')} Anuladas</span><b>${s.resolution.other}</b></li>` : ''}
+        </ul>
+      </div>
+    </div>
+    ${s.useDonut ? picksByStatusChart(s) : ''}`;
 }
 
 function statsTabsHtml(active) {
@@ -3316,8 +3341,7 @@ function statsTabsHtml(active) {
 
 function statsPerformancePanel(d) {
   const summary = window.MA_STATS.performanceSummary(d);
-  const settledForEv = d.buckets.reduce((s, b) => s + (Number(b.settled_count) || 0), 0);
-  const roiReady = window.MA_STATS.chartReadiness(settledForEv);
+  const roiReady = window.MA_STATS.roiByEvReadiness(d.buckets);
   return `
     ${performanceSummaryCard(summary)}
     <section class="stats-section">
@@ -3325,21 +3349,29 @@ function statsPerformancePanel(d) {
       ${marketVerdictList(d.marketCards)}
     </section>
     <section class="stats-section">
-      <h3>Estado de los picks</h3>
-      ${picksStatusSection(d.decisions)}
+      <h3>Estado de las decisiones</h3>
+      ${picksStatusSection(d.decisions, d.totals, d.decisionsLimit)}
     </section>
     <section class="stats-section">
       <h3>ROI por rango de EV</h3>
-      ${roiReady.show ? roiByEvChart(d.buckets) : statsEmptyState('⏳', 'Recopilando resultados', 'Necesitamos más picks liquidados para comparar el rendimiento por rango de EV.', roiReady.maturity)}
+      ${roiReady.show ? roiByEvChart(d.buckets) : sampleEmptyState('⏳', roiReady.maturity, {
+        noData: ['Aún no hay resultados', 'El rendimiento por rango de EV aparecerá cuando haya picks con stake liquidados.'],
+        insufficient: ['Aún no hay suficientes resultados', 'Necesitamos más picks con stake liquidados para comparar el rendimiento por rango de EV.'],
+      })}
     </section>`;
 }
 
 function statsModelPanel(d) {
   const latest = d.calibration[0] || {};
-  const calReady = window.MA_STATS.chartReadiness(latest.sample_size);
+  const calReady = window.MA_STATS.chartReadiness(latest.sample_size, window.MA_STATS.MIN_CALIBRATION_SAMPLE, 'predicciones');
   const hasBuckets = d.calibration.some((r) => Array.isArray(r.buckets) && r.buckets.length);
   let calibrationHtml;
-  if (!calReady.show) calibrationHtml = statsEmptyState('⏳', 'Recopilando resultados', 'La calibración por tramos necesita más resultados liquidados para ser interpretable.', calReady.maturity);
+  if (!calReady.show) {
+    calibrationHtml = sampleEmptyState('⏳', calReady.maturity, {
+      noData: ['Aún no hay calibración', 'La calibración aparece cuando haya predicciones con resultado.'],
+      insufficient: ['Recopilando resultados', 'La calibración por tramos necesita más predicciones con resultado para ser interpretable.'],
+    });
+  }
   else if (!hasBuckets) calibrationHtml = statsEmptyState('📊', 'Calibración por tramos no disponible', 'El servidor todavía no entrega la tasa observada por tramo; se muestran Brier, log-loss y ECE arriba.');
   else calibrationHtml = calibrationBucketChart(d.calibration);
   return `
@@ -3370,7 +3402,7 @@ function statsAiPanel(d) {
     <section class="stats-section">
       <h3>Impacto de la IA por liga</h3>
       <p class="perf-summary__note">En <b>modo sombra</b> la IA se evalúa sin modificar las predicciones; solo se activa si demuestra
-        menor error con un test estadístico (p ≤ ${window.MA_STATS.AI_MAX_P_VALUE.toFixed(2)}) y ${window.MA_STATS.MIN_SAMPLE_SIZE}+ partidos.</p>
+        menor error con un test estadístico (p ≤ ${window.MA_STATS.AI_MAX_P_VALUE.toFixed(2)}) y ${window.MA_STATS.MIN_AI_ACTIVATION_SAMPLE}+ partidos.</p>
       ${aiImpactList(d.aiPolicies, d.aiTrack)}
     </section>`;
 }
@@ -3392,7 +3424,7 @@ function renderStatsPanel() {
     initMetricsHistoryChart(d.history);
     initCalibrationChart(d.calibration);
     initRoiChart(d.buckets);
-    initPicksDonut(d.decisions);
+    initPicksDonut(window.MA_STATS.pickStatusSummary(d.decisions, d.totals, d.decisionsLimit));
   });
 }
 
@@ -3407,7 +3439,7 @@ async function renderStats(options = {}) {
   if (!options.silent) {
     root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando estadísticas</span><i></i></div></div>`;
   }
-  let calibration = [], buckets = [], decisions = [], history = [], aiPolicies = [], aiTrack = [], marketCards = [], clv = null;
+  let calibration = [], buckets = [], decisions = [], totals = [], decisionsLimit = null, history = [], aiPolicies = [], aiTrack = [], marketCards = [], clv = null;
   try {
     const [calData, roiData, bankData] = await Promise.all([
       cached('calibration/summary', { limit: 5 }, 120000, options),
@@ -3417,6 +3449,8 @@ async function renderStats(options = {}) {
     calibration = calData.calibration || [];
     buckets = roiData.buckets || [];
     decisions = bankData.decisions || [];
+    totals = Array.isArray(bankData.totals) ? bankData.totals : []; // every decision (older API: absent)
+    decisionsLimit = bankData.limit ?? 200;
   } catch (error) {
     if (error.name === 'AbortError') return;
     root.innerHTML = `<div class="stats-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
@@ -3444,13 +3478,13 @@ async function renderStats(options = {}) {
     if (error.name === 'AbortError') return;
   }
 
-  setStatus('Estadísticas', `${decisions.length} picks`);
+  setStatus('Estadísticas', `${window.MA_STATS.pickStatusSummary(decisions, totals, decisionsLimit).total} decisiones`);
   const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0 || aiPolicies.length > 0 || marketCards.length > 0;
   if (!hasData) {
     root.innerHTML = `<div class="stats-view">${statsRoadmapEmpty()}</div>`;
     return;
   }
-  state.statsData = { calibration, buckets, decisions, history, aiPolicies, aiTrack, marketCards, clv };
+  state.statsData = { calibration, buckets, decisions, totals, decisionsLimit, history, aiPolicies, aiTrack, marketCards, clv };
   state.statsTab = window.MA_STATS.normalizeStatsTab(state.statsTab);
   root.innerHTML = `
     <div class="stats-view">

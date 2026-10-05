@@ -6,9 +6,16 @@
  * (picks / AI cases) and the difference of two values the API already returns (Brier IA − Brier modelo).
  */
 (function (root) {
-  // Minimum settled results before a result is treated as more than preliminary. Same value as the
-  // backend thresholds (app/learning/ai_policy.py MIN_SETTLED and the calibration minimum sample).
+  // Sample minimums. They are separate domain rules that happen to share the value 30 today:
+  //  * MIN_SAMPLE_SIZE: UI rule — settled results before a result (summary, model vs market, ROI by EV) is
+  //    treated as more than preliminary.
+  //  * MIN_AI_ACTIVATION_SAMPLE: backend app/learning/ai_policy.py MIN_SETTLED (one of three AI promotion
+  //    conditions, with the p-value test and a lower error — never re-applied here).
+  //  * MIN_CALIBRATION_SAMPLE: backend app/calibration/evaluator.py MIN_SAMPLES (settled predictions per
+  //    selection needed to fit a calibration map).
   const MIN_SAMPLE_SIZE = 30;
+  const MIN_AI_ACTIVATION_SAMPLE = 30;
+  const MIN_CALIBRATION_SAMPLE = 30;
   // The backend's AI promotion test (app/learning/ai_policy.py MAX_P_VALUE): shown, never re-applied here.
   const AI_MAX_P_VALUE = 0.10;
   // Picks donut only when it says more than a list: at least this many distinct states.
@@ -16,25 +23,65 @@
 
   const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 
-  /** Sample maturity for n results. level: none | insufficient | sufficient. */
-  function sampleMaturity(n, min = MIN_SAMPLE_SIZE) {
-    const value = Math.max(0, Math.trunc(num(n) || 0));
-    const level = value === 0 ? 'none' : value < min ? 'insufficient' : 'sufficient';
+  const SAMPLE_LABELS = { NO_DATA: 'Sin resultados aún', INSUFFICIENT: 'Muestra insuficiente', READY: 'Muestra suficiente' };
+
+  /**
+   * The one place that decides the sample state of a metric / chart:
+   *   NO_DATA (0 observations) · INSUFFICIENT (1 … minimum−1) · READY (≥ minimum).
+   * `unit` names what is counted (resultados, predicciones…) so the label never implies another universe.
+   */
+  function getSampleStatus(n, minimum = MIN_SAMPLE_SIZE, unit = 'resultados') {
+    const current = Math.max(0, Math.trunc(num(n) || 0));
+    const status = current === 0 ? 'NO_DATA' : current < minimum ? 'INSUFFICIENT' : 'READY';
     return {
-      n: value,
-      min,
-      level,
-      sufficient: level === 'sufficient',
-      progress: Math.min(1, value / min),
-      label: level === 'sufficient' ? 'Muestra suficiente' : level === 'none' ? 'Sin resultados aún' : 'Muestra insuficiente',
-      countLabel: `${value} / ${min} resultados`,
+      status,
+      current,
+      minimum,
+      label: SAMPLE_LABELS[status],
+      countLabel: `${current} / ${minimum} ${unit}`,
+      progress: Math.min(1, current / minimum),
     };
   }
 
+  /** getSampleStatus in the shape the cards use (n / min / level / sufficient). */
+  function sampleMaturity(n, min = MIN_SAMPLE_SIZE, unit = 'resultados') {
+    const st = getSampleStatus(n, min, unit);
+    const level = { NO_DATA: 'none', INSUFFICIENT: 'insufficient', READY: 'sufficient' }[st.status];
+    return { ...st, n: st.current, min, level, sufficient: st.status === 'READY' };
+  }
+
   /** A chart is shown only with enough observations; otherwise an empty state with progress. */
-  function chartReadiness(n, min = MIN_SAMPLE_SIZE) {
-    const maturity = sampleMaturity(n, min);
+  function chartReadiness(n, min = MIN_SAMPLE_SIZE, unit) {
+    const maturity = sampleMaturity(n, min, unit);
     return { show: maturity.sufficient, maturity };
+  }
+
+  /**
+   * ROI by EV range. ROI = profit / stake over SETTLED decisions WITH a stake, so its N is
+   * `staked_settled_count` (older backends: settled_count of buckets that do have a ROI). Buckets without a
+   * ROI are not plotted (a 0 bar would read as a real break-even result).
+   */
+  function roiByEvReadiness(buckets) {
+    const bs = Array.isArray(buckets) ? buckets : [];
+    const points = bs.filter((b) => num(b && b.roi_pct) !== null);
+    const hasStaked = bs.some((b) => b && b.staked_settled_count !== undefined);
+    const n = hasStaked
+      ? bs.reduce((s, b) => s + (num(b.staked_settled_count) || 0), 0)
+      : points.reduce((s, b) => s + (num(b.settled_count) || 0), 0);
+    const maturity = sampleMaturity(n, MIN_SAMPLE_SIZE, 'picks con stake liquidados');
+    return { show: maturity.sufficient && points.length > 0, maturity, points };
+  }
+
+  const HISTORY_KEYS = ['brier_score', 'log_loss', 'ece', 'clv_avg', 'paper_roi'];
+
+  /**
+   * Daily history: a time series is useful from its first real value, so there is no 30-result minimum —
+   * only "no point has any metric" (dates without values) is an empty state.
+   */
+  function historyReadiness(series) {
+    const list = Array.isArray(series) ? series : [];
+    const points = list.filter((p) => p && HISTORY_KEYS.some((k) => num(p[k]) !== null && typeof p[k] !== 'boolean'));
+    return { show: points.length > 0, points: points.length, days: list.length };
   }
 
   /**
@@ -104,7 +151,7 @@
     const items = (track && Array.isArray(track.items) && track.items.length ? track.items : (track && track.largest_recent)) || [];
     const counts = aiCaseCounts(items);
     const n = num(track && track.n) ?? num(policy && policy.n_settled) ?? 0;
-    const maturity = sampleMaturity(n);
+    const maturity = sampleMaturity(n, MIN_AI_ACTIVATION_SAMPLE);
     const brierModel = stageBrier(policy, 'raw');
     const brierAi = stageBrier(policy, 'ai');
     const brierCalibrated = stageBrier(policy, 'calibrated');
@@ -138,51 +185,88 @@
   }
 
   const STATUS_LABELS = {
-    BETTABLE: 'Apostables', PAPER_ONLY: 'Solo papel', NO_EDGE: 'Sin ventaja', BLOCKED: 'Bloqueados',
+    BETTABLE: 'Apostables', PAPER_ONLY: 'Solo papel', NO_EDGE: 'Sin ventaja', BLOCKED: 'Bloqueadas',
   };
   const STATUS_ICONS = { BETTABLE: '✅', PAPER_ONLY: '📝', NO_EDGE: '➖', BLOCKED: '🚫' };
 
-  /** Pick counts by decision status (real states only) + settlement, and whether a donut adds value. */
-  function pickStatusSummary(decisions) {
-    const list = Array.isArray(decisions) ? decisions : [];
+  /**
+   * Betting decisions on two INDEPENDENT dimensions (a decision is e.g. BLOCKED and also PENDING), so they
+   * are never listed as one set of categories:
+   *   decision   — decision_status (BETTABLE / PAPER_ONLY / NO_EDGE / BLOCKED): sums to total
+   *   resolution — settlement_status (pending / settled / other): also sums to total
+   * `totals` (API /stats/bankroll → totals, every decision) is preferred; without it the counts cover only
+   * the `decisions` list, which is the API's most recent `limit` rows (source = 'recent').
+   */
+  function pickStatusSummary(decisions, totals, limit) {
+    const rows = [];
+    if (Array.isArray(totals) && totals.length) {
+      totals.forEach((t) => rows.push({ decision: t.decision_status, settlement: t.settlement_status, n: num(t.n) || 0 }));
+    } else {
+      (Array.isArray(decisions) ? decisions : []).forEach((d) => rows.push({
+        decision: d && d.decision_status, settlement: d && d.settlement_status, n: 1,
+      }));
+    }
     const byStatus = {};
-    let settled = 0;
-    let pending = 0;
-    list.forEach((d) => {
-      const s = String((d && d.decision_status) || 'UNKNOWN');
-      byStatus[s] = (byStatus[s] || 0) + 1;
-      if (d && d.settlement_status === 'SETTLED') settled += 1;
-      else if (d && (d.settlement_status === 'PENDING' || !d.settlement_status)) pending += 1;
+    const resolution = { pending: 0, settled: 0, other: 0 };
+    let total = 0;
+    rows.forEach((r) => {
+      const s = String(r.decision || 'UNKNOWN');
+      byStatus[s] = (byStatus[s] || 0) + r.n;
+      total += r.n;
+      const st = String(r.settlement || 'PENDING').toUpperCase();
+      if (st === 'SETTLED') resolution.settled += r.n;
+      else if (st === 'PENDING') resolution.pending += r.n;
+      else resolution.other += r.n; // VOID / CANCELLED…: neither pending nor settled
     });
-    const rows = Object.entries(byStatus)
+    const decisionRows = Object.entries(byStatus)
       .sort((a, b) => b[1] - a[1])
       .map(([status, count]) => ({ status, count, label: STATUS_LABELS[status] || status, icon: STATUS_ICONS[status] || '•' }));
-    return { total: list.length, rows, settled, pending, useDonut: rows.length >= DONUT_MIN_CATEGORIES };
+    const source = Array.isArray(totals) && totals.length ? 'all' : 'recent';
+    return {
+      total, source, recentLimit: source === 'recent' ? num(limit) : null,
+      rows: decisionRows, decisionRows, resolution,
+      settled: resolution.settled, pending: resolution.pending,
+      useDonut: decisionRows.length >= DONUT_MIN_CATEGORIES,
+    };
   }
 
   /**
-   * Summary card. Every value is taken from the API: settled count from calibration / ROI buckets, ROI as the
-   * settled-weighted average of bucket ROI (same formula the KPI bar already used), CLV from /stats/clv
-   * (days window), Brier from the latest calibration run.
+   * Summary card. Every value comes from the API and keeps its OWN universe and N:
+   *   settled  — settled betting decisions (all of them via `totals`; fallback: settled with EV ≥ 0 from the
+   *              ROI buckets). This is the header count and the sample badge.
+   *   roi/roiN — profit / stake of settled decisions with a stake (settled-weighted bucket ROI, same formula
+   *              as before); roiN = staked_settled_count (null when the backend does not send it).
+   *   clv/clvN — /stats/clv summary (settled decisions with a closing line, `days` window).
+   *   brier/brierN — latest calibration run: n settled predictions × selection of ONE competition/market.
    */
-  function performanceSummary({ calibration, buckets, clv }) {
+  function performanceSummary({ calibration, buckets, clv, totals }) {
     const latest = (Array.isArray(calibration) && calibration[0]) || {};
     const bs = Array.isArray(buckets) ? buckets : [];
     const settledFromBuckets = bs.reduce((s, b) => s + (num(b.settled_count) || 0), 0);
-    const settled = num(latest.n_settled) ?? (settledFromBuckets || num(latest.sample_size) || 0);
+    const settledAll = Array.isArray(totals) && totals.length
+      ? totals.reduce((s, t) => s + (String(t.settlement_status).toUpperCase() === 'SETTLED' ? num(t.n) || 0 : 0), 0)
+      : null;
+    // calibration/summary fallback row carries n_settled = settled betting decisions (same universe)
+    const settled = settledAll ?? num(latest.n_settled) ?? (settledFromBuckets || 0);
     const roiWeight = bs.reduce((s, b) => s + (num(b.roi_pct) !== null ? num(b.settled_count) || 0 : 0), 0);
     const roi = roiWeight > 0 ? bs.reduce((s, b) => s + (num(b.roi_pct) || 0) * (num(b.roi_pct) !== null ? num(b.settled_count) || 0 : 0), 0) / roiWeight : null;
+    const hasStaked = bs.some((b) => b && b.staked_settled_count !== undefined);
+    const roiN = hasStaked ? bs.reduce((s, b) => s + (num(b.staked_settled_count) || 0), 0) : null;
     const clvSummary = (clv && clv.summary) || {};
     const clvN = num(clvSummary.n) || 0;
+    const brier = num(latest.brier_score);
     return {
       settled,
+      settledSource: settledAll !== null || num(latest.n_settled) !== null ? 'all' : 'ev_buckets',
       roi,
+      roiN,
       clv: clvN > 0 ? num(clvSummary.clv_avg) : null,
       clvN,
       clvDays: num(clv && clv.days),
-      brier: num(latest.brier_score),
-      brierN: num(latest.sample_size) || 0,
-      maturity: sampleMaturity(settled),
+      brier,
+      brierN: brier !== null ? num(latest.sample_size) || 0 : 0,
+      brierScope: [latest.market_code, latest.competition_name || latest.season || null].filter(Boolean).join(' · ') || null,
+      maturity: sampleMaturity(settled, MIN_SAMPLE_SIZE, 'decisiones con resultado'),
     };
   }
 
@@ -199,8 +283,8 @@
   }
 
   const api = {
-    MIN_SAMPLE_SIZE, AI_MAX_P_VALUE, DONUT_MIN_CATEGORIES, STATS_TABS,
-    sampleMaturity, chartReadiness, marketVerdict, stageBrier, aiCaseCounts, aiModeInfo, aiImpact,
+    MIN_SAMPLE_SIZE, MIN_AI_ACTIVATION_SAMPLE, MIN_CALIBRATION_SAMPLE, AI_MAX_P_VALUE, DONUT_MIN_CATEGORIES, STATS_TABS,
+    getSampleStatus, sampleMaturity, chartReadiness, roiByEvReadiness, historyReadiness, marketVerdict, stageBrier, aiCaseCounts, aiModeInfo, aiImpact,
     reasonLabel, pickStatusSummary, performanceSummary, leaguesBeatingMarket, normalizeStatsTab,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

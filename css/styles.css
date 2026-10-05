@@ -2120,6 +2120,9 @@ tbody tr:hover { background: rgba(255, 255, 255, .026); }
 .pick-status-list { list-style: none; margin: 0 0 .6rem; padding: 0; display: grid; gap: .1rem; }
 .pick-status-list li { display: flex; justify-content: space-between; align-items: center; padding: .5rem .2rem; border-bottom: 1px solid var(--line); font-size: .88rem; }
 .pick-status-list li b { font-variant-numeric: tabular-nums; font-size: 1rem; }
+.pick-status-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .4rem 1.2rem; }
+.pick-status-groups__title { margin: .4rem 0 .1rem; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.metric-card__n { margin-top: .15rem; font-size: .7rem; color: var(--muted); overflow-wrap: anywhere; }
 .pick-status-list__sep { margin-top: .4rem; }
 
 .metric-help { display: inline-block; position: relative; vertical-align: middle; }
