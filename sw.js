@@ -10,7 +10,7 @@
  *
  * Registered with a relative URL/scope, so it works under the GitHub Pages prefix.
  */
-const VERSION = 'v20261003id';
+const VERSION = 'v20261005st';
 const ASSET_CACHE = `ma-assets-${VERSION}`;
 const API_CACHE = 'ma-api-v1';
 const MAX_API_ENTRIES = 80;

@@ -3044,8 +3044,8 @@ function statsKpiBar(calibration, buckets) {
     { label: 'Brier Score', value: fmtNum(latest.brier_score, 4), cls: '' },
     { label: 'Log Loss', value: fmtNum(latest.log_loss, 4), cls: '' },
     { label: 'ECE', value: fmtNum(latest.ece, 4), cls: '' },
-    { label: 'ROI prom.', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
-    { label: 'Picks n', value: latest.sample_size ?? 0, cls: '' },
+    { label: 'ROI papel prom.', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
+    { label: 'Muestra (n)', value: latest.sample_size ?? 0, cls: '' },
   ];
   return `<div class="kpi-bar">${cards.map((c) => `
     <div class="metric-card ${c.cls}">
@@ -3060,7 +3060,7 @@ function metricsHistoryChart(series) {
   if (!series.length) return `<div class="chart-wrap">${quantEmptyState('📈', 'Sin historial de métricas', 'La serie aparece cuando el loop diario registra métricas por competición.')}</div>`;
   return `
     <div class="chart-wrap"><canvas id="${id}" aria-label="${escapeHtml('Historial diario de métricas del modelo')}" role="img"></canvas></div>
-    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI paper.')}</p>`;
+    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI papel.')}</p>`;
 }
 
 function initMetricsHistoryChart(series) {
@@ -3082,7 +3082,7 @@ function initMetricsHistoryChart(series) {
         line('Log-loss', 'log_loss', 'rgba(159,176,195,.9)', 'y'),
         line('ECE', 'ece', 'rgba(244,197,66,.9)', 'y'),
         line('CLV', 'clv_avg', 'rgba(30,215,96,.9)', 'y1', true),
-        line('ROI paper', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
+        line('ROI papel', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
       ],
     },
     options: {
@@ -3132,80 +3132,282 @@ function statsRoadmapEmpty() {
     </div>`;
 }
 
-function aiStageBrier(policy, stage) {
-  const sm = policy?.stage_metrics || {};
-  const m = sm[`${stage}_90d`] || sm[`${stage}_30d`];
-  return m && m.brier_score != null ? Number(m.brier_score) : null;
-}
-
-function aiLeagueCards(policies, track) {
-  if (!policies.length) return quantEmptyState('🤖', 'Sin política de IA', 'Se crea con el job ai_policy_update.');
-  const trackBy = new Map(track.map((t) => [t.competition, t]));
-  const fmtB = (v) => (v != null && !isNaN(v) ? Number(v).toFixed(4) : '—');
-  return `<div class="ai-league-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem">${policies.map((p) => {
-    const t = trackBy.get(p.competition) || {};
-    const recent = Array.isArray(t.largest_recent) ? t.largest_recent : [];
-    const reason = typeof p.reason === 'string' ? p.reason : '';
-    const rows = recent.map((r) => {
-      const adj = r.adjustment_pp || {};
-      return `<li>${escapeHtml(r.home_team || '?')} ${escapeHtml(r.score || '')} ${escapeHtml(r.away_team || '?')}
-        <span style="color:var(--muted)">H${escapeHtml(Number(adj.HOME || 0).toFixed(1))} D${escapeHtml(Number(adj.DRAW || 0).toFixed(1))} A${escapeHtml(Number(adj.AWAY || 0).toFixed(1))}pp</span>
-        <span class="chip ${r.helped ? '' : 'chip--muted'}">${r.helped ? 'ayudó' : 'empeoró'}</span></li>`;
-    }).join('');
-    return `
-      <article class="card" style="padding:.8rem">
-        <header style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">
-          <strong>${escapeHtml(p.competition_name || p.competition || '')}</strong>
-          <span class="chip">${escapeHtml(aiModeLabel(p.mode))}</span>
-        </header>
-        <div style="font-size:.75rem;margin:.4rem 0;display:grid;grid-template-columns:1fr 1fr;gap:.2rem .6rem">
-          <span>alpha</span><b>${escapeHtml(Number(p.alpha || 0).toFixed(2))}</b>
-          <span>n settled IA</span><b>${escapeHtml(String(p.n_settled ?? 0))}</b>
-          <span>Brier modelo (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'raw')))}</b>
-          <span>Brier IA (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'ai')))}</b>
-          <span>Brier calibrado (90d)</span><b>${escapeHtml(fmtB(aiStageBrier(p, 'calibrated')))}</b>
-        </div>
-        ${reason ? `<div style="font-size:.75rem;color:var(--muted)">${escapeHtml(reason)}</div>` : ''}
-        ${rows ? `<ul style="margin:.4rem 0 0;padding-left:1rem;font-size:.75rem">${rows}</ul>` : '<div style="font-size:.75rem;color:var(--muted)">Sin ajustes IA liquidados aún.</div>'}
-      </article>`;
-  }).join('')}</div>`;
-}
-
-// Phase F: per league × market card — log-loss model vs market, ECE, CLV, n.
+// Phase F: model stage names used in the market comparison details.
 const MARKET_STAGE_LABEL = { calibrated: 'calibrado', ensemble: 'ensamble', pre: 'pre-calib.', dixon_coles: 'Dixon-Coles', poisson: 'Poisson' };
 
-function marketLeagueCards(cards) {
-  if (!cards.length) return quantEmptyState('📊', 'Sin métricas por mercado', 'Se generan con el job market_stage_metrics.');
-  const f4 = (v) => (v != null && !isNaN(v) ? Number(v).toFixed(4) : '—');
-  const pct = (v) => (v != null && !isNaN(v) ? `${(Number(v) * 100).toFixed(1)}%` : '—');
-  return `<div class="market-card-grid">${cards.map((c) => {
-    const diff = c.vs_market_ll_diff;
-    const diffCls = diff == null ? '' : diff < 0 ? 'market-card__diff--good' : 'market-card__diff--bad';
-    const ml = c.market === 'OVER_UNDER' ? 'O/U 2.5' : c.market;
-    return `
-      <article class="card market-card">
-        <header class="market-card__head">
-          <strong>${escapeHtml(c.competition_name || c.competition || '')}</strong>
-          <span class="chip chip--warn">${escapeHtml(ml || '')}</span>
-        </header>
-        <div class="market-card__grid">
-          <span>Log-loss ${escapeHtml(MARKET_STAGE_LABEL[c.model_stage] || 'modelo')}</span><b>${escapeHtml(f4(c.model_log_loss))}</b>
-          <span>Log-loss mercado</span><b>${escapeHtml(f4(c.market_log_loss))}</b>
-          <span>vs mercado</span><b class="${diffCls}">${diff == null ? '—' : escapeHtml(`${diff > 0 ? '+' : ''}${Number(diff).toFixed(4)}`)}</b>
-          <span>ECE</span><b>${escapeHtml(f4(c.model_ece))}</b>
-          <span>CLV medio</span><b>${escapeHtml(pct(c.clv_avg))}</b>
-          <span>ROI paper</span><b>${escapeHtml(pct(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(pct(c.roi_ci_low))}, ${escapeHtml(pct(c.roi_ci_high))}]</small>` : ''}</b>
-          <span>n</span><b>${escapeHtml(String(c.n ?? 0))}</b>
-        </div>
-      </article>`;
-  }).join('')}</div>`;
+// ─── Stats view ──────────────────────────────────────────────────────────────
+// Three internal tabs (Rendimiento / Modelo / IA). Interpretation (sample maturity, verdicts, AI impact)
+// lives in js/stats-insights.js (MA_STATS, unit-tested); this section only renders.
+
+const METRIC_HELP = {
+  brier: 'Error de las probabilidades. Menor es mejor.',
+  logloss: 'Penaliza especialmente las predicciones muy seguras que fallan. Menor es mejor.',
+  ece: 'Qué tan bien calibradas están las probabilidades. Menor es mejor.',
+  clv: 'Compara la cuota obtenida con la cuota de cierre del mercado. Positivo es mejor.',
+  roi: 'Ganancia por unidad apostada en modo papel (simulado).',
+};
+
+function metricHelp(key) {
+  const text = METRIC_HELP[key];
+  if (!text) return '';
+  return `<details class="metric-help"><summary aria-label="${escapeHtml(`Qué significa: ${text}`)}">?</summary><span>${escapeHtml(text)}</span></details>`;
 }
+
+function sampleBadge(maturity) {
+  const cls = maturity.sufficient ? 'sample-badge--ok' : 'sample-badge--warn';
+  const icon = maturity.sufficient ? '🟢' : '🟡';
+  return `
+    <div class="sample-badge ${cls}">
+      <span class="sample-badge__label">${deco(icon)} ${escapeHtml(maturity.label)}</span>
+      <span class="sample-badge__count">${escapeHtml(maturity.countLabel)}</span>
+      <span class="sample-badge__bar" role="progressbar" aria-valuemin="0" aria-valuemax="${maturity.min}" aria-valuenow="${Math.min(maturity.n, maturity.min)}" aria-label="${escapeHtml(maturity.countLabel)}"><i style="width:${Math.round(maturity.progress * 100)}%"></i></span>
+    </div>`;
+}
+
+// Reusable "not enough data yet" state for charts/sections that need a sample to mean anything.
+function statsEmptyState(icon, title, text, maturity) {
+  return `
+    <div class="quant-empty stats-empty">
+      <div class="quant-empty__icon">${icon}</div>
+      <div class="quant-empty__title">${escapeHtml(title)}</div>
+      <div class="quant-empty__text">${escapeHtml(text)}</div>
+      ${maturity ? sampleBadge(maturity) : ''}
+    </div>`;
+}
+
+const fmt4 = (v) => (v != null && !Number.isNaN(Number(v)) ? Number(v).toFixed(4) : '—');
+const fmtPctFrac = (v) => (v != null && !Number.isNaN(Number(v)) ? `${(Number(v) * 100).toFixed(1)}%` : '—');
+
+function performanceSummaryCard(summary) {
+  const roiCls = summary.roi > 0 ? 'metric-card--ok' : summary.roi < 0 ? 'metric-card--danger' : '';
+  const clvLabel = summary.clvDays ? `CLV (${summary.clvDays} días)` : 'CLV';
+  return `
+    <article class="card perf-summary">
+      <header class="perf-summary__head">
+        <h3>Rendimiento del modelo</h3>
+        <span class="perf-summary__n"><b>${escapeHtml(String(summary.settled))}</b> picks liquidados</span>
+      </header>
+      <div class="kpi-bar perf-summary__kpis">
+        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">ROI papel ${metricHelp('roi')}</div></div>
+        <div class="metric-card"><div class="metric-card__value">${summary.clv != null ? escapeHtml(fmtPctFrac(summary.clv)) : '—'}</div><div class="metric-card__label">${escapeHtml(clvLabel)} ${metricHelp('clv')}</div></div>
+        <div class="metric-card"><div class="metric-card__value">${escapeHtml(fmt4(summary.brier))}</div><div class="metric-card__label">Brier ${metricHelp('brier')}</div></div>
+      </div>
+      ${sampleBadge(summary.maturity)}
+      ${summary.maturity.sufficient ? '' : '<p class="perf-summary__note">Resultados preliminares: todavía no son evidencia estadística concluyente.</p>'}
+    </article>`;
+}
+
+function marketTechGrid(c) {
+  const diff = c.vs_market_ll_diff;
+  const diffCls = diff == null ? '' : diff < 0 ? 'market-card__diff--good' : 'market-card__diff--bad';
+  return `
+    <div class="market-card__grid">
+      <span>Log-loss ${escapeHtml(MARKET_STAGE_LABEL[c.model_stage] || 'modelo')}</span><b>${escapeHtml(fmt4(c.model_log_loss))}</b>
+      <span>Log-loss mercado</span><b>${escapeHtml(fmt4(c.market_log_loss))}</b>
+      <span>Diferencia vs mercado</span><b class="${diffCls}">${diff == null ? '—' : escapeHtml(`${diff > 0 ? '+' : ''}${Number(diff).toFixed(4)}`)}</b>
+      <span>ECE</span><b>${escapeHtml(fmt4(c.model_ece))}</b>
+      <span>CLV medio</span><b>${escapeHtml(fmtPctFrac(c.clv_avg))}</b>
+      <span>ROI papel</span><b>${escapeHtml(fmtPctFrac(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(fmtPctFrac(c.roi_ci_low))}, ${escapeHtml(fmtPctFrac(c.roi_ci_high))}]</small>` : ''}</b>
+      <span>n</span><b>${escapeHtml(String(c.n ?? 0))}</b>
+    </div>`;
+}
+
+const MARKET_LABEL = { OVER_UNDER: 'Más/Menos 2,5', BTTS: 'Ambos marcan', '1X2': '1X2' };
+const VERDICT_ICON = { good: '🟢', bad: '🔴', pending: '🟡', neutral: '⚪' };
+
+function marketVerdictCard(c, { open = false } = {}) {
+  const v = window.MA_STATS.marketVerdict(c);
+  const metric = v.improvement != null
+    ? `<div class="verdict-card__metric"><span>Mejora de log-loss ${metricHelp('logloss')}</span><b>${escapeHtml(fmt4(v.improvement))}</b></div>`
+    : v.diff != null ? `<div class="verdict-card__metric"><span>Diferencia de log-loss ${metricHelp('logloss')}</span><b>${escapeHtml(`${v.diff > 0 ? '+' : ''}${fmt4(v.diff)}`)}</b></div>` : '';
+  return `
+    <article class="card verdict-card verdict-card--${v.tone}">
+      <header class="verdict-card__head">
+        <strong>${escapeHtml(c.competition_name || c.competition || '')}</strong>
+        <span class="chip chip--muted">${escapeHtml(MARKET_LABEL[c.market] || c.market || '')}</span>
+      </header>
+      <div class="verdict-card__title">${deco(VERDICT_ICON[v.tone] || '⚪')} ${escapeHtml(v.title)}</div>
+      ${metric}
+      ${sampleBadge(v.maturity)}
+      <details class="verdict-card__details"${open ? ' open' : ''}><summary>Ver detalles</summary>${marketTechGrid(c)}</details>
+    </article>`;
+}
+
+function marketVerdictList(cards, options) {
+  if (!cards.length) return quantEmptyState('📊', 'Sin métricas por mercado', 'Se generan con el job market_stage_metrics.');
+  return `<div class="market-card-grid">${cards.map((c) => marketVerdictCard(c, options)).join('')}</div>`;
+}
+
+function aiCaseRow(r) {
+  const adj = r.adjustment_pp || null;
+  const d = Number(r.brier_delta);
+  const tag = d < 0 ? ['chip--ok', 'AYUDÓ'] : d > 0 ? ['chip--danger', 'EMPEORÓ'] : ['chip--muted', 'NEUTRAL'];
+  const adjText = adj ? `L ${Number(adj.HOME || 0).toFixed(1)} · E ${Number(adj.DRAW || 0).toFixed(1)} · V ${Number(adj.AWAY || 0).toFixed(1)} pp` : '';
+  return `<li class="ai-case">
+      <span class="ai-case__match">${escapeHtml(r.home_team || '?')} <b>${escapeHtml(r.score || '')}</b> ${escapeHtml(r.away_team || '?')}</span>
+      <span class="chip ${tag[0]}">${tag[1]}</span>
+      <small>${escapeHtml([adjText, Number.isFinite(d) ? `ΔBrier ${d > 0 ? '+' : ''}${d.toFixed(4)}` : ''].filter(Boolean).join(' · '))}</small>
+    </li>`;
+}
+
+function aiImpactCard(policy, track) {
+  const imp = window.MA_STATS.aiImpact(policy, track);
+  const items = (track && Array.isArray(track.items) && track.items.length ? track.items : (track && track.largest_recent)) || [];
+  const reason = typeof policy.reason === 'string' ? policy.reason : '';
+  const diffText = imp.diff == null ? '—' : `${imp.diff > 0 ? '+' : ''}${imp.diff.toFixed(4)}`;
+  return `
+    <article class="card verdict-card ai-impact verdict-card--${imp.verdict.tone}">
+      <header class="verdict-card__head">
+        <strong>${escapeHtml(policy.competition_name || policy.competition || '')}</strong>
+        <span class="chip ${imp.mode.applied ? 'chip--ok' : 'chip--warn'}">${escapeHtml(imp.mode.label)}</span>
+      </header>
+      <p class="ai-impact__mode">${escapeHtml(imp.mode.text)}</p>
+      ${imp.counts.total ? `<div class="ai-impact__counts">
+        <span>${deco('🟢')} Ayudó <b>${imp.counts.helped}</b></span>
+        <span>${deco('🔴')} Empeoró <b>${imp.counts.worsened}</b></span>
+        <span>${deco('⚪')} Neutral <b>${imp.counts.neutral}</b></span>
+      </div>` : ''}
+      <div class="verdict-card__title">${deco(VERDICT_ICON[imp.verdict.tone] || '⚪')} ${escapeHtml(imp.verdict.title)}</div>
+      <div class="market-card__grid ai-impact__brier">
+        <span>Brier modelo ${metricHelp('brier')}</span><b>${escapeHtml(fmt4(imp.brierModel))}</b>
+        <span>Brier IA</span><b>${escapeHtml(fmt4(imp.brierAi))}</b>
+        <span>Brier calibrado</span><b>${escapeHtml(fmt4(imp.brierCalibrated))}</b>
+        <span>Diferencia (IA − modelo)</span><b>${escapeHtml(diffText)}</b>
+      </div>
+      ${sampleBadge(imp.maturity)}
+      <details class="verdict-card__details">
+        <summary>Ver casos analizados${imp.casesPartial ? ` (últimos ${imp.casesShown} de ${imp.n})` : ''}</summary>
+        ${items.length ? `<ul class="ai-case-list">${items.map(aiCaseRow).join('')}</ul>` : '<p class="perf-summary__note">Sin ajustes de IA liquidados aún.</p>'}
+        <div class="market-card__grid">
+          <span>alpha (peso IA)</span><b>${escapeHtml(Number(policy.alpha || 0).toFixed(2))}</b>
+          <span>n liquidados IA</span><b>${escapeHtml(String(policy.n_settled ?? 0))}</b>
+          <span>Estado</span><b>${escapeHtml(window.MA_STATS.reasonLabel(reason) || '—')}</b>
+          ${policy.p_value != null ? `<span>p-valor (test de signo)</span><b>${escapeHtml(Number(policy.p_value).toFixed(3))}</b>` : ''}
+          ${reason ? `<span>Código</span><b><code>${escapeHtml(reason)}</code></b>` : ''}
+        </div>
+      </details>
+    </article>`;
+}
+
+function aiImpactList(policies, track) {
+  if (!policies.length) return quantEmptyState('🤖', 'Sin política de IA', 'Se crea con el job ai_policy_update.');
+  const trackBy = new Map(track.map((t) => [t.competition, t]));
+  return `<div class="market-card-grid">${policies.map((p) => aiImpactCard(p, trackBy.get(p.competition) || {})).join('')}</div>`;
+}
+
+function picksStatusSection(decisions) {
+  const s = window.MA_STATS.pickStatusSummary(decisions);
+  if (!s.total) return quantEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.');
+  return `
+    <ul class="pick-status-list">
+      ${s.rows.map((r) => `<li><span>${deco(r.icon)} ${escapeHtml(r.label)}</span><b>${r.count}</b></li>`).join('')}
+      <li class="pick-status-list__sep"><span>${deco('⏳')} Pendientes de resultado</span><b>${s.pending}</b></li>
+      <li><span>${deco('✅')} Liquidados</span><b>${s.settled}</b></li>
+    </ul>
+    ${s.useDonut ? picksByStatusChart(decisions) : ''}`;
+}
+
+function statsTabsHtml(active) {
+  const tabs = [['performance', 'Rendimiento'], ['model', 'Modelo'], ['ai', 'IA']];
+  return `<div class="segment stats-tabs" role="tablist" aria-label="Secciones de estadísticas">
+    ${tabs.map(([key, label]) => `<button type="button" role="tab" id="stats-tab-${key}" data-stats-tab="${key}" aria-controls="stats-panel" aria-selected="${active === key}" class="${active === key ? 'active' : ''}">${escapeHtml(label)}</button>`).join('')}
+  </div>`;
+}
+
+function statsPerformancePanel(d) {
+  const summary = window.MA_STATS.performanceSummary(d);
+  const settledForEv = d.buckets.reduce((s, b) => s + (Number(b.settled_count) || 0), 0);
+  const roiReady = window.MA_STATS.chartReadiness(settledForEv);
+  return `
+    ${performanceSummaryCard(summary)}
+    <section class="stats-section">
+      <h3>Match Alpha vs mercado</h3>
+      ${marketVerdictList(d.marketCards)}
+    </section>
+    <section class="stats-section">
+      <h3>Estado de los picks</h3>
+      ${picksStatusSection(d.decisions)}
+    </section>
+    <section class="stats-section">
+      <h3>ROI por rango de EV</h3>
+      ${roiReady.show ? roiByEvChart(d.buckets) : statsEmptyState('⏳', 'Recopilando resultados', 'Necesitamos más picks liquidados para comparar el rendimiento por rango de EV.', roiReady.maturity)}
+    </section>`;
+}
+
+function statsModelPanel(d) {
+  const latest = d.calibration[0] || {};
+  const calReady = window.MA_STATS.chartReadiness(latest.sample_size);
+  const hasBuckets = d.calibration.some((r) => Array.isArray(r.buckets) && r.buckets.length);
+  let calibrationHtml;
+  if (!calReady.show) calibrationHtml = statsEmptyState('⏳', 'Recopilando resultados', 'La calibración por tramos necesita más resultados liquidados para ser interpretable.', calReady.maturity);
+  else if (!hasBuckets) calibrationHtml = statsEmptyState('📊', 'Calibración por tramos no disponible', 'El servidor todavía no entrega la tasa observada por tramo; se muestran Brier, log-loss y ECE arriba.');
+  else calibrationHtml = calibrationBucketChart(d.calibration);
+  return `
+    <section class="stats-section">
+      <h3>Métricas del modelo</h3>
+      <div class="model-help">
+        <span><b>Brier</b> ${metricHelp('brier')}</span><span><b>Log loss</b> ${metricHelp('logloss')}</span>
+        <span><b>ECE</b> ${metricHelp('ece')}</span><span><b>CLV</b> ${metricHelp('clv')}</span>
+      </div>
+      ${statsKpiBar(d.calibration, d.buckets)}
+    </section>
+    <section class="stats-section">
+      <h3>Evolución diaria (30 días)</h3>
+      ${metricsHistoryChart(d.history)}
+    </section>
+    <section class="stats-section">
+      <h3>Calibración</h3>
+      ${calibrationHtml}
+    </section>
+    <section class="stats-section">
+      <h3>Modelo vs mercado (detalle)</h3>
+      ${marketVerdictList(d.marketCards, { open: true })}
+    </section>`;
+}
+
+function statsAiPanel(d) {
+  return `
+    <section class="stats-section">
+      <h3>Impacto de la IA por liga</h3>
+      <p class="perf-summary__note">En <b>modo sombra</b> la IA se evalúa sin modificar las predicciones; solo se activa si demuestra
+        menor error con un test estadístico (p ≤ ${window.MA_STATS.AI_MAX_P_VALUE.toFixed(2)}) y ${window.MA_STATS.MIN_SAMPLE_SIZE}+ partidos.</p>
+      ${aiImpactList(d.aiPolicies, d.aiTrack)}
+    </section>`;
+}
+
+function renderStatsPanel() {
+  const d = state.statsData;
+  const panel = document.getElementById('stats-panel');
+  if (!d || !panel) return;
+  const tab = window.MA_STATS.normalizeStatsTab(state.statsTab);
+  panel.setAttribute('aria-labelledby', `stats-tab-${tab}`);
+  panel.innerHTML = tab === 'model' ? statsModelPanel(d) : tab === 'ai' ? statsAiPanel(d) : statsPerformancePanel(d);
+  document.querySelectorAll('[data-stats-tab]').forEach((b) => {
+    const on = b.dataset.statsTab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  loadChartJs().catch(() => null).then(() => {
+    if (state.view !== 'stats' || typeof Chart === 'undefined') return;
+    initMetricsHistoryChart(d.history);
+    initCalibrationChart(d.calibration);
+    initRoiChart(d.buckets);
+    initPicksDonut(d.decisions);
+  });
+}
+
+document.addEventListener('click', (event) => {
+  const btn = event.target.closest?.('[data-stats-tab]');
+  if (!btn) return;
+  state.statsTab = window.MA_STATS.normalizeStatsTab(btn.dataset.statsTab);
+  renderStatsPanel();
+});
 
 async function renderStats(options = {}) {
   if (!options.silent) {
-    root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando Stats</span><i></i></div></div>`;
+    root.innerHTML = `<div class="stats-view"><div class="loading-head"><span>Cargando estadísticas</span><i></i></div></div>`;
   }
-  let calibration = [], buckets = [], decisions = [], history = [], aiPolicies = [], aiTrack = [], marketCards = [];
+  let calibration = [], buckets = [], decisions = [], history = [], aiPolicies = [], aiTrack = [], marketCards = [], clv = null;
   try {
     const [calData, roiData, bankData] = await Promise.all([
       cached('calibration/summary', { limit: 5 }, 120000, options),
@@ -3220,7 +3422,7 @@ async function renderStats(options = {}) {
     root.innerHTML = `<div class="stats-view"><div class="error">${escapeHtml(error.message)}</div></div>`;
     return;
   }
-  // Optional (F4.6): an older backend without the endpoint must not break the view.
+  // Optional sources: an older backend without one of these endpoints must not break the view.
   try {
     const histData = await cached('model/metrics/history', { days: 30 }, 300000, options);
     history = Array.isArray(histData?.series) ? histData.series : [];
@@ -3228,61 +3430,34 @@ async function renderStats(options = {}) {
     marketCards = Array.isArray(histData?.market_cards) ? histData.market_cards : [];
   } catch (error) {
     if (error.name === 'AbortError') return;
-    history = [];
   }
   try {
-    const trackData = await cached('model/ai-track-record', { days: 90, limit: 5 }, 300000, options);
+    // limit 200 (API max): enough to count helped / worsened / neutral cases per league
+    const trackData = await cached('model/ai-track-record', { days: 90, limit: 200 }, 300000, options);
     aiTrack = Array.isArray(trackData?.competitions) ? trackData.competitions : [];
   } catch (error) {
     if (error.name === 'AbortError') return;
-    aiTrack = [];
+  }
+  try {
+    clv = await cached('stats/clv', { days: 30 }, 300000, options);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
   }
 
-  setStatus('Stats', `${decisions.length} picks`);
-
+  setStatus('Estadísticas', `${decisions.length} picks`);
   const hasData = decisions.length > 0 || calibration.length > 0 || history.length > 0 || aiPolicies.length > 0 || marketCards.length > 0;
-
+  if (!hasData) {
+    root.innerHTML = `<div class="stats-view">${statsRoadmapEmpty()}</div>`;
+    return;
+  }
+  state.statsData = { calibration, buckets, decisions, history, aiPolicies, aiTrack, marketCards, clv };
+  state.statsTab = window.MA_STATS.normalizeStatsTab(state.statsTab);
   root.innerHTML = `
     <div class="stats-view">
-      ${!hasData ? statsRoadmapEmpty() : `
-      <section class="stats-section">
-        <h3>KPIs del Modelo</h3>
-        ${statsKpiBar(calibration, buckets)}
-      </section>
-      <section class="stats-section">
-        <h3>Modelo vs mercado por liga y mercado</h3>
-        ${marketLeagueCards(marketCards)}
-      </section>
-      <section class="stats-section">
-        <h3>IA por liga (modelo vs IA vs calibrado)</h3>
-        ${aiLeagueCards(aiPolicies, aiTrack)}
-      </section>
-      <section class="stats-section">
-        <h3>Evolución diaria (30 días)</h3>
-        ${metricsHistoryChart(history)}
-      </section>
-      <section class="stats-section">
-        <h3>Calibración (bucket chart)</h3>
-        ${calibrationBucketChart(calibration)}
-      </section>
-      <section class="stats-section">
-        <h3>ROI por Rango de EV</h3>
-        ${roiByEvChart(buckets)}
-      </section>
-      <section class="stats-section">
-        <h3>Picks por Estado</h3>
-        ${picksByStatusChart(decisions)}
-      </section>`}
+      ${statsTabsHtml(state.statsTab)}
+      <div id="stats-panel" role="tabpanel"></div>
     </div>`;
-
-  // Init charts after DOM painted (only if data exists)
-  if (hasData) loadChartJs().catch(() => null).then(() => {
-    if (state.view !== 'stats' || typeof Chart === 'undefined') return;
-    initMetricsHistoryChart(history);
-    initCalibrationChart(calibration);
-    initRoiChart(buckets);
-    initPicksDonut(decisions);
-  });
+  renderStatsPanel();
 }
 
 // ─── News view ───────────────────────────────────────────────────────────────
