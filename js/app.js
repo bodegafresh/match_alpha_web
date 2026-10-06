@@ -11,8 +11,26 @@ const SEASON = (() => {
 })();
 const KEY_STORAGE = CFG.KEY_STORAGE || 'poolteam2026'; // storage key name kept so saved keys survive; replaced by accounts (SaaS F4)
 const AUTO_REFRESH_MS = Number(CFG.AUTO_REFRESH_MS || 30000);
-const CHILE_TIMEZONE = 'America/Santiago';
-const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || CHILE_TIMEZONE;
+// Every date / time is shown in the USER's time zone (browser setting); ?tz=America/Bogota overrides it for
+// testing. "Today / tomorrow" and the day grouping follow that zone too.
+const FALLBACK_TIMEZONE = 'America/Santiago';
+function validTimeZone(zone) {
+  try { return zone ? Boolean(new Intl.DateTimeFormat('es', { timeZone: zone })) && zone : null; } catch { return null; }
+}
+const BROWSER_TIMEZONE = validTimeZone(new URLSearchParams(location.search).get('tz'))
+  || Intl.DateTimeFormat().resolvedOptions().timeZone || FALLBACK_TIMEZONE;
+const USER_TIMEZONE = BROWSER_TIMEZONE;
+// "Chile", "Colombia", "Argentina"… from the zone (Intl long generic name), used as the time suffix.
+const USER_ZONE_LABEL = (() => {
+  try {
+    const name = new Intl.DateTimeFormat('es', { timeZone: USER_TIMEZONE, timeZoneName: 'longGeneric' })
+      .formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value || '';
+    const city = USER_TIMEZONE.split('/').pop().replace(/_/g, ' ');
+    const m = name.match(/^hora (?:estándar |de verano )?(?:de |del |de la )?(.+)$/i);
+    // "Chile", "Colombia", "Europa central"; generic names ("central", "del Pacífico") → the zone's city
+    return m && /^[A-ZÁÉÍÓÚÑ]/.test(m[1]) ? m[1] : city;
+  } catch { return USER_TIMEZONE.split('/').pop().replace(/_/g, ' '); }
+})();
 const BROWSER_LANG = (navigator.language || 'en').toLowerCase().split('-')[0];
 
 const state = {
@@ -100,7 +118,7 @@ function isFinishedStatus(status) {
 }
 
 function ymd(date) {
-  return new Intl.DateTimeFormat('sv-SE', { timeZone: CHILE_TIMEZONE }).format(date);
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: USER_TIMEZONE }).format(date);
 }
 
 function addDays(date, days) {
@@ -111,26 +129,26 @@ function addDays(date, days) {
 
 function dateLabel(value) {
   if (!value) return '';
-  return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: CHILE_TIMEZONE })
+  return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: USER_TIMEZONE })
     .format(new Date(value))
     .replace('.', '')
     .replace(/\s+/g, '-')
     .toUpperCase();
 }
 
-function timeLabel(value, timeZone = CHILE_TIMEZONE) {
+function timeLabel(value, timeZone = USER_TIMEZONE) {
   if (!value) return '';
   return new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }).format(new Date(value));
 }
 
-function chileDateTimeLabel(value) {
+function userDateTimeLabel(value) {
   if (!value) return '';
-  return `${dateLabel(value).toLowerCase()} · ${timeLabel(value)} Chile`;
+  return `${dateLabel(value).toLowerCase()} · ${timeLabel(value)} ${USER_ZONE_LABEL}`;
 }
 
-function chileParts(date) {
+function userParts(date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: CHILE_TIMEZONE,
+    timeZone: USER_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -152,11 +170,11 @@ function chileParts(date) {
   };
 }
 
-function chileDateToUtcIso(ymdValue, hour = 0, minute = 0) {
+function userDateToUtcIso(ymdValue, hour = 0, minute = 0) {
   const [year, month, day] = String(ymdValue).split('-').map(Number);
   let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
   for (let i = 0; i < 3; i += 1) {
-    const parts = chileParts(guess);
+    const parts = userParts(guess);
     const diffMinutes =
       (Date.UTC(year, month - 1, day, hour, minute, 0) -
        Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second || 0)) / 60000;
@@ -165,19 +183,19 @@ function chileDateToUtcIso(ymdValue, hour = 0, minute = 0) {
   return guess.toISOString();
 }
 
-function chileOperationalRange(baseDate, offsetDays = 0) {
+function userOperationalRange(baseDate, offsetDays = 0) {
   const startYmd = ymd(addDays(baseDate, offsetDays));
   const nextYmd = ymd(addDays(baseDate, offsetDays + 1));
   return {
-    kickoff_from: chileDateToUtcIso(startYmd, 0, 0),
-    kickoff_to: chileDateToUtcIso(nextYmd, 1, 0),
+    kickoff_from: userDateToUtcIso(startYmd, 0, 0),
+    kickoff_to: userDateToUtcIso(nextYmd, 1, 0),
     label: startYmd
   };
 }
 
 function localVenueTimeLabel(match) {
   const zone = match.venue?.timezone_name;
-  if (!zone || zone === CHILE_TIMEZONE) return '';
+  if (!zone || timeLabel(match.kickoff_at, zone) === timeLabel(match.kickoff_at)) return '';
   return `${timeLabel(match.kickoff_at, zone)} local`;
 }
 
@@ -700,7 +718,7 @@ function matchTimeHtml(match) {
   const label = escapeHtml(statusLabel(match.status));
   const min = liveMinuteLabel(match);
   if (min) return `${label} · <strong class="match-minute">${escapeHtml(min)}</strong>`;
-  return `${label} · ${escapeHtml(chileDateTimeLabel(match.kickoff_at))}`;
+  return `${label} · ${escapeHtml(userDateTimeLabel(match.kickoff_at))}`;
 }
 
 function matchCard(match) {
@@ -728,9 +746,9 @@ function matchCard(match) {
 
 function matchesOverviewParams() {
   const now = new Date();
-  const yesterday = chileOperationalRange(now, -1);
-  const today = chileOperationalRange(now, 0);
-  const tomorrow = chileOperationalRange(now, 1);
+  const yesterday = userOperationalRange(now, -1);
+  const today = userOperationalRange(now, 0);
+  const tomorrow = userOperationalRange(now, 1);
   return {
     yesterday_from: yesterday.kickoff_from,
     yesterday_to: yesterday.kickoff_to,
@@ -739,7 +757,7 @@ function matchesOverviewParams() {
     tomorrow_from: tomorrow.kickoff_from,
     tomorrow_to: tomorrow.kickoff_to,
     upcoming_from: tomorrow.kickoff_from,
-    upcoming_to: chileOperationalRange(now, 30).kickoff_to,
+    upcoming_to: userOperationalRange(now, 30).kickoff_to,
     weather_refresh_limit: '8'
   };
 }
@@ -833,7 +851,7 @@ async function renderToday(options = {}) {
           return `
             <div class="kickoff-block">
               <div class="kickoff-header">
-                <span class="kickoff-time">${escapeHtml(block.timeKey)} Chile</span>
+                <span class="kickoff-time">${escapeHtml(block.timeKey)} ${escapeHtml(USER_ZONE_LABEL)}</span>
                 <span class="kickoff-meta">${count} partido${count !== 1 ? 's' : ''}${hasLive ? ' <span class="live-badge">EN VIVO</span>' : ''}</span>
               </div>
               <div class="grid">${block.matches.map(matchCard).join('')}</div>
@@ -1141,7 +1159,7 @@ function matchdayOf(match) {
   return {
     key: `day-${day}`,
     label: match.kickoff_at
-      ? new Date(match.kickoff_at).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: CHILE_TIMEZONE })
+      ? new Date(match.kickoff_at).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: USER_TIMEZONE })
       : 'Sin fecha',
     sort: match.kickoff_at ? new Date(match.kickoff_at).getTime() : Number.MAX_SAFE_INTEGER,
   };
@@ -1975,7 +1993,7 @@ function attachKnockoutSwipe(container, rerender) {
 function knockoutCard(match) {
   return `
     <article class="card bracket-card fade-in"${matchDetailAttrs(match)}>
-      <div class="bracket-top"><span>${escapeHtml(match.match_number ? `Partido ${match.match_number}` : 'Partido')}</span><b>${escapeHtml(chileDateTimeLabel(match.kickoff_at))}</b></div>
+      <div class="bracket-top"><span>${escapeHtml(match.match_number ? `Partido ${match.match_number}` : 'Partido')}</span><b>${escapeHtml(userDateTimeLabel(match.kickoff_at))}</b></div>
       <div class="bracket-team">${teamMark(match.home)} <strong>${escapeHtml(match.home?.display_name || match.home?.slot_label || 'Por definir')}</strong>${teamBadges(match.home)}</div>
       <div class="bracket-vs">${matchScore(match)}</div>
       <div class="bracket-team">${teamMark(match.away)} <strong>${escapeHtml(match.away?.display_name || match.away?.slot_label || 'Por definir')}</strong>${teamBadges(match.away)}</div>
@@ -2494,7 +2512,7 @@ function evHeroCard(opp) {
       <div class="ev-hero-body">
         <div class="ev-hero-match">
           <div class="ev-hero-match-label">${escapeHtml(opp.matchLabel)}</div>
-          <div class="ev-hero-match-date">${escapeHtml(opp.kickoffAt ? chileDateTimeLabel(opp.kickoffAt) : '')}</div>
+          <div class="ev-hero-match-date">${escapeHtml(opp.kickoffAt ? userDateTimeLabel(opp.kickoffAt) : '')}</div>
         </div>
         <div class="ev-hero-metrics">
           <div class="ev-hero-metric">
@@ -2541,7 +2559,7 @@ function evOpportunityRow(opp) {
   const confPct = opp.confidenceScore != null ? Math.round(opp.confidenceScore * 100) : null;
   const confLevel = confPct != null ? (confPct >= 65 ? 'high' : confPct >= 35 ? 'medium' : 'low') : 'low';
 
-  const kickoff = opp.kickoffAt ? chileDateTimeLabel(opp.kickoffAt) : '';
+  const kickoff = opp.kickoffAt ? userDateTimeLabel(opp.kickoffAt) : '';
   const hasLambdaBlock = opp.homeLambda != null && opp.awayLambda != null;
   const lambdaBlock = hasLambdaBlock
     ? `λ: ${fmtNum(opp.homeLambda)}-${fmtNum(opp.awayLambda)} · Over 2.5: ${fmtPct(opp.over25Prob)} · BTTS: ${fmtPct(opp.bttsYesProb)}`
@@ -4151,7 +4169,7 @@ function eventsTimelineHtml(events) {
 function h2hDateLabel(value) {
   const d = value ? new Date(value) : null;
   if (!d || Number.isNaN(d.getTime())) return '';
-  return `${dateLabel(value)} ${d.toLocaleDateString('es-CL', { year: 'numeric', timeZone: 'America/Santiago' })}`;
+  return `${dateLabel(value)} ${d.toLocaleDateString('es-CL', { year: 'numeric', timeZone: USER_TIMEZONE })}`;
 }
 
 function h2hHtml(rows, match) {
@@ -4221,7 +4239,7 @@ function matchInfoHtml(detail) {
   if (v.display_name || v.city) rows.push(['Estadio', [v.display_name, v.city].filter(Boolean).join(', ')]);
   if (v.capacity) rows.push(['Capacidad', num(v.capacity).toLocaleString('es-CL')]);
   if (v.surface) rows.push(['Superficie', v.surface]);
-  rows.push(['Inicio', chileDateTimeLabel(m.kickoff_at)]);
+  rows.push(['Inicio', userDateTimeLabel(m.kickoff_at)]);
   const local = localVenueTimeLabel(m);
   if (local) rows.push(['Hora local', local]);
   (detail.officials || []).forEach((o) => rows.push([OFFICIAL_ROLE_LABELS[String(o.role || '').toUpperCase()] || 'Árbitro', o.display_name || '-']));
