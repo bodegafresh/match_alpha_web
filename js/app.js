@@ -4225,25 +4225,31 @@ function probabilityCompareHtml(detail) {
   const bySel = Object.fromEntries(preds.map((p) => [String(p.selection_code).toUpperCase(), p]));
   const m = detail.match || {};
   const labels = { HOME: m.home?.display_name || 'Local', DRAW: 'Empate', AWAY: m.away?.display_name || 'Visita' };
-  const bar = (label, value, cls) => (value == null ? '' : `
+  const SEL = ['HOME', 'DRAW', 'AWAY'];
+  // Each source is one complete outcome set: normalised and rounded together so it always shows 100 %
+  // (largest remainder), and the model never mixes calibrated and raw values across selections.
+  const model = window.MA_PROB.modelOutcomeSet(bySel, SEL);
+  const aiVals = Object.fromEntries(SEL.map((s) => [s, (bySel[s] || {}).ai_adjusted_probability]));
+  const shown = {
+    model: window.MA_PROB.outcomeSetPercents(model.values, SEL),
+    ai: window.MA_PROB.outcomeSetPercents(aiVals, SEL),
+    market: window.MA_PROB.outcomeSetPercents(noVig, SEL),
+  };
+  const bar = (label, pct, cls) => (pct == null ? '' : `
     <div class="prob-bar-row">
       <span class="prob-bar-label">${escapeHtml(label)}</span>
-      <div class="prob-bar-track"><div class="prob-bar-fill ${cls}" style="width:${Math.round(num(value) * 100)}%"></div></div>
-      <span class="prob-bar-value">${Math.round(num(value) * 100)}%</span>
+      <div class="prob-bar-track"><div class="prob-bar-fill ${cls}" style="width:${pct}%"></div></div>
+      <span class="prob-bar-value">${pct}%</span>
     </div>`);
-  const blocks = ['HOME', 'DRAW', 'AWAY'].map((sel) => {
-    const p = bySel[sel] || {};
-    const model = p.calibrated_probability ?? p.raw_probability;
-    return `
+  const blocks = SEL.map((sel) => `
       <div class="prob-block">
         <div class="prob-block-title"><strong>${escapeHtml(labels[sel])}</strong>${best[sel] ? `<span>Mejor cuota ${num(best[sel]).toFixed(2)}</span>` : ''}</div>
         <div class="prob-bars">
-          ${bar('Modelo', model, 'prob-bar-fill--model')}
-          ${bar('IA', p.ai_adjusted_probability, 'prob-bar-fill--ai')}
-          ${bar('Mercado', noVig[sel], 'prob-bar-fill--market')}
+          ${bar('Modelo', shown.model[sel], 'prob-bar-fill--model')}
+          ${bar('IA', shown.ai[sel], 'prob-bar-fill--ai')}
+          ${bar('Mercado', shown.market[sel], 'prob-bar-fill--market')}
         </div>
-      </div>`;
-  }).join('');
+      </div>`).join('');
   const ai = detail.ai_factors;
   const factors = ai ? [
     ...(ai.factors || []).map((f) => f.description).filter(Boolean),
