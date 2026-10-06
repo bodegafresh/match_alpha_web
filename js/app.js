@@ -21,17 +21,22 @@ const BROWSER_TIMEZONE = validTimeZone(new URLSearchParams(location.search).get(
   || Intl.DateTimeFormat().resolvedOptions().timeZone || FALLBACK_TIMEZONE;
 const USER_TIMEZONE = BROWSER_TIMEZONE;
 // "Chile", "Colombia", "Argentina"… from the zone (Intl long generic name), used as the time suffix.
+const UI_LANG = (window.MA_I18N && window.MA_I18N.lang) || 'es';
+const UI_LOCALE = (window.MA_I18N && window.MA_I18N.locale) || 'es-CL';
 const USER_ZONE_LABEL = (() => {
   try {
-    const name = new Intl.DateTimeFormat('es', { timeZone: USER_TIMEZONE, timeZoneName: 'longGeneric' })
+    const name = new Intl.DateTimeFormat(UI_LANG, { timeZone: USER_TIMEZONE, timeZoneName: 'longGeneric' })
       .formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value || '';
     const city = USER_TIMEZONE.split('/').pop().replace(/_/g, ' ');
-    const m = name.match(/^hora (?:estándar |de verano )?(?:de |del |de la )?(.+)$/i);
+    // es "hora estándar de Colombia" · en "Colombia Standard Time" · pt "Horário Padrão da Colômbia"
+    const m = name.match(/^hora (?:estándar |de verano )?(?:de |del |de la )?(.+)$/i)
+      || name.match(/^(.+?) (?:Standard |Daylight |Summer )?Time$/)
+      || name.match(/^Horário (?:Padrão |de Verão )?(?:de |do |da |dos )?(.+)$/i);
     // "Chile", "Colombia", "Europa central"; generic names ("central", "del Pacífico") → the zone's city
     return m && /^[A-ZÁÉÍÓÚÑ]/.test(m[1]) ? m[1] : city;
   } catch { return USER_TIMEZONE.split('/').pop().replace(/_/g, ' '); }
 })();
-const BROWSER_LANG = (navigator.language || 'en').toLowerCase().split('-')[0];
+const BROWSER_LANG = (window.MA_I18N && window.MA_I18N.lang) || (navigator.language || 'es').toLowerCase().split('-')[0];
 
 const state = {
   view: 'today',
@@ -129,7 +134,7 @@ function addDays(date, days) {
 
 function dateLabel(value) {
   if (!value) return '';
-  return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: USER_TIMEZONE })
+  return new Intl.DateTimeFormat(UI_LOCALE, { day: '2-digit', month: 'short', timeZone: USER_TIMEZONE })
     .format(new Date(value))
     .replace('.', '')
     .replace(/\s+/g, '-')
@@ -138,7 +143,7 @@ function dateLabel(value) {
 
 function timeLabel(value, timeZone = USER_TIMEZONE) {
   if (!value) return '';
-  return new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }).format(new Date(value));
+  return new Intl.DateTimeFormat(UI_LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }).format(new Date(value));
 }
 
 function userDateTimeLabel(value) {
@@ -1159,7 +1164,7 @@ function matchdayOf(match) {
   return {
     key: `day-${day}`,
     label: match.kickoff_at
-      ? new Date(match.kickoff_at).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: USER_TIMEZONE })
+      ? new Date(match.kickoff_at).toLocaleDateString(UI_LOCALE, { weekday: 'long', day: 'numeric', month: 'long', timeZone: USER_TIMEZONE })
       : 'Sin fecha',
     sort: match.kickoff_at ? new Date(match.kickoff_at).getTime() : Number.MAX_SAFE_INTEGER,
   };
@@ -1220,6 +1225,8 @@ function attachMatchdayHandlers(rerender) {
   });
 }
 
+const ELO_TYPE_LABEL = { GLOBAL: 'Global', DOMESTIC: 'Liga local', INTERNATIONAL: 'Selecciones' };
+
 function qualificationStatusLabel(value) {
   const status = String(value || 'PENDING').toUpperCase();
   return {
@@ -1230,7 +1237,7 @@ function qualificationStatusLabel(value) {
     PENDING_TIEBREAKER: 'Pendiente',
     PENDING: 'Pendiente',
     ELIMINATED: 'Eliminado',
-  }[status] || status;
+  }[status] || ZONE_LABELS[status] || 'Pendiente';
 }
 
 function standingsGlobalHtml(rows) {
@@ -1337,9 +1344,9 @@ function teamCatalogCard(team) {
 
 function teamsFilterControls(data) {
   const af = data.available_filters || {};
-  const makeOptions = (items, current, label) => {
+  const makeOptions = (items, current, label, text = (v) => v) => {
     const opts = [`<option value="">${label}</option>`]
-      .concat((items || []).map((item) => `<option value="${escapeHtml(item)}" ${item === current ? 'selected' : ''}>${escapeHtml(item)}</option>`));
+      .concat((items || []).map((item) => `<option value="${escapeHtml(item)}" ${item === current ? 'selected' : ''}>${escapeHtml(text(item))}</option>`));
     return opts.join('');
   };
   return `
@@ -1354,7 +1361,7 @@ function teamsFilterControls(data) {
             <option value="elo" ${state.teamsFilters.sort === 'elo' ? 'selected' : ''}>ELO</option>
           </select>
           <select id="teams-group">${makeOptions(af.groups, state.teamsFilters.group, 'Grupo/Stage')}</select>
-          <select id="teams-status">${makeOptions(af.statuses, state.teamsFilters.status, 'Estado')}</select>
+          <select id="teams-status">${makeOptions(af.statuses, state.teamsFilters.status, 'Estado', qualificationStatusLabel)}</select>
           <select id="teams-country">${makeOptions(af.countries, state.teamsFilters.country, 'País')}</select>
           <select id="teams-continent">${makeOptions(af.continents, state.teamsFilters.continent, 'Continente')}</select>
         </div>
@@ -2298,7 +2305,7 @@ function eloTableHtml(data) {
       <div class="card teams-filter-card" style="margin-bottom:.75rem">
         <div class="teams-filter-grid" style="grid-template-columns:minmax(180px, 260px)">
           <select id="elo-rating-type">
-            ${(data.rating_types || []).map((value) => `<option value="${escapeHtml(value)}" ${value === data.rating_type ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}
+            ${(data.rating_types || []).map((value) => `<option value="${escapeHtml(value)}" ${value === data.rating_type ? 'selected' : ''}>${escapeHtml(ELO_TYPE_LABEL[value] || value)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -2331,7 +2338,7 @@ async function renderElo(options = {}) {
   const params = state.eloRatingType ? { rating_type: state.eloRatingType } : {};
   const data = await cached(`competitions/${SEASON}/elo`, params, 90000, options);
   const teams = data.teams || [];
-  setStatus('ELO', `${teams.length} equipos · ${data.rating_type || ''}`.trim());
+  setStatus('ELO', `${teams.length} equipos · ${ELO_TYPE_LABEL[data.rating_type] || data.rating_type || ''}`.trim());
   root.innerHTML = teams.length ? eloTableHtml(data) : emptyState('No hay ratings ELO disponibles para esta season.');
 
   const select = document.getElementById('elo-rating-type');
@@ -3608,6 +3615,13 @@ document.addEventListener('keydown', (event) => {
   });
 });
 
+// Interface language (es / en / pt): js/i18n.js picks it from the time zone; the user can override it here.
+const langSelect = document.getElementById('lang-select');
+if (langSelect && window.MA_I18N) {
+  langSelect.value = window.MA_I18N.lang;
+  langSelect.addEventListener('change', () => window.MA_I18N.setLang(langSelect.value));
+}
+
 $('#refresh-btn').addEventListener('click', () => {
   state.cache.clear();
   state.layout = null;
@@ -4169,7 +4183,7 @@ function eventsTimelineHtml(events) {
 function h2hDateLabel(value) {
   const d = value ? new Date(value) : null;
   if (!d || Number.isNaN(d.getTime())) return '';
-  return `${dateLabel(value)} ${d.toLocaleDateString('es-CL', { year: 'numeric', timeZone: USER_TIMEZONE })}`;
+  return `${dateLabel(value)} ${d.toLocaleDateString(UI_LOCALE, { year: 'numeric', timeZone: USER_TIMEZONE })}`;
 }
 
 function h2hHtml(rows, match) {
@@ -4237,7 +4251,7 @@ function matchInfoHtml(detail) {
   const v = m.venue || {};
   const rows = [];
   if (v.display_name || v.city) rows.push(['Estadio', [v.display_name, v.city].filter(Boolean).join(', ')]);
-  if (v.capacity) rows.push(['Capacidad', num(v.capacity).toLocaleString('es-CL')]);
+  if (v.capacity) rows.push(['Capacidad', num(v.capacity).toLocaleString(UI_LOCALE)]);
   if (v.surface) rows.push(['Superficie', v.surface]);
   rows.push(['Inicio', userDateTimeLabel(m.kickoff_at)]);
   const local = localVenueTimeLabel(m);

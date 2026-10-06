@@ -24,12 +24,17 @@
   function fmtKickoff(value) {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return '—';
-    return d.toLocaleString('es-CL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString((window.MA_I18N && window.MA_I18N.locale) || 'es-CL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
+
+  const MARKET_LABEL = { '1X2': '1X2', OVER_UNDER: 'Más/Menos', BTTS: 'Ambos marcan' };
+  const SELECTION_LABEL = { HOME: 'Local', DRAW: 'Empate', AWAY: 'Visita', OVER: 'Más de', UNDER: 'Menos de', YES: 'Sí', NO: 'No' };
 
   function pickLabel(p) {
     const line = p.line === null || p.line === undefined ? '' : ` ${num(p.line)}`;
-    return `${p.market || ''} · ${p.selection || ''}${line}`;
+    const market = MARKET_LABEL[String(p.market || '').toUpperCase()] || p.market || '';
+    const selection = SELECTION_LABEL[String(p.selection || '').toUpperCase()] || p.selection || '';
+    return `${market} · ${selection}${line}`;
   }
 
   function queryParams(page) {
@@ -48,7 +53,7 @@
       const seen = new Map();
       entries.forEach((e) => {
         const slug = String(e.competition_slug || '');
-        if (slugOk(slug) && !seen.has(slug)) seen.set(slug, String(e.competition_name || e.display_name || slug));
+        if (slugOk(slug) && !seen.has(slug)) seen.set(slug, String(e.competition_name || e.display_name || e.name || slug));
       });
       return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], 'es'));
     } catch {
