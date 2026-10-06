@@ -66,8 +66,8 @@
     const cards = [
       ['Picks', String(num(s.n)), `${num(s.n_graded)} resueltos`],
       ['Acierto', pct(s.hit_rate), 'ganados / resueltos'],
-      ['ROI (1 unidad por pick)', pct(s.roi), ci],
-      ['Unidades', signed(s.profit_units), 'stake plano 1u'],
+      ['Rendimiento simulado (1 unidad)', pct(s.roi), ci],
+      ['Resultado simulado', signed(s.profit_units), '1 unidad por selección'],
       ['CLV medio', s.clv_avg === null || s.clv_avg === undefined ? '—' : `${signed(num(s.clv_avg) * 100, 1)}%`, `${pct(s.clv_positive_rate, 0)} con CLV > 0`],
     ];
     return `<div class="ph-summary">${cards.map(([t, v, sub]) => `
@@ -83,7 +83,7 @@
   }
 
   function stageChip(p) {
-    const status = p.decision_status === 'BETTABLE' ? 'Apostable' : 'Paper';
+    const status = p.decision_status === 'BETTABLE' ? 'Valor alto' : 'En observación';
     return `<span class="ph-chip ph-chip--muted">${escapeHtml(status)}</span>${p.ai_active ? '<span class="ph-chip ph-chip--ai">IA</span>' : ''}`;
   }
 
@@ -97,7 +97,7 @@
 
   function rowsTable(picks) {
     return `<div class="ph-table-wrap"><table class="ph-table">
-      <thead><tr><th>Fecha</th><th>Partido</th><th>Pick</th><th>Cuota</th><th>Cierre</th><th>CLV</th><th>EV</th><th>Resultado</th><th>U</th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Cierre</th><th>CLV</th><th>Valor</th><th>Resultado</th><th>Res.</th></tr></thead>
       <tbody>${picks.map((p) => `<tr>
         <td>${escapeHtml(fmtKickoff(p.kickoff_at))}</td>
         <td><button type="button" class="ph-link" data-ph-match="${escapeHtml(p.match_id)}">${escapeHtml(matchTitle(p))}</button>
@@ -122,7 +122,7 @@
           <div><dt>Cuota</dt><dd>${escapeHtml(fixed(p.odds_taken))}</dd></div>
           <div><dt>Cierre</dt><dd>${escapeHtml(fixed(p.closing_odds))}</dd></div>
           <div><dt>CLV</dt><dd>${escapeHtml(p.clv === null ? '—' : `${signed(num(p.clv) * 100, 1)}%`)}</dd></div>
-          <div><dt>Unid.</dt><dd>${escapeHtml(signed(p.profit_units))}</dd></div>
+          <div><dt>Res.</dt><dd>${escapeHtml(signed(p.profit_units))}</dd></div>
         </dl>
       </article>`).join('')}</div>`;
   }
@@ -161,13 +161,13 @@
     lastData = data;
     const picks = Array.isArray(data.picks) ? data.picks : [];
     const s = data.summary || {};
-    setStatus('Historial', `${num(data.total)} picks`);
+    setStatus('Historial', `${num(data.total)} selecciones`);
     el.innerHTML = `<div class="ph-view">
       <div class="ph-intro card">
-        <h2>Historial de picks</h2>
-        <p>Picks del modelo (apostables y <em>paper</em>) ya resueltos, publicados <strong>antes del inicio</strong> de cada partido.
-        CLV = ln(cuota tomada / cuota de cierre sin margen, consenso). ROI con stake plano de 1 unidad. Son estimaciones estadísticas,
-        no asesoría financiera; rendimientos pasados no garantizan resultados futuros. Solo mayores de 18 años.</p>
+        <h2>Historial de selecciones</h2>
+        <p>Selecciones del modelo ya resueltas, publicadas <strong>antes del inicio</strong> de cada partido, para medir su precisión con transparencia.
+        CLV = ln(cuota publicada / cuota de cierre sin margen, consenso). Rendimiento simulado con 1 unidad por selección, sin dinero real.
+        Son estimaciones estadísticas, no asesoría financiera; los resultados pasados no garantizan resultados futuros. Solo mayores de 18 años.</p>
       </div>
       ${filterBar(comps)}
       ${summaryCards(s)}

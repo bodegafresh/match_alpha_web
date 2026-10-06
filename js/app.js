@@ -329,7 +329,7 @@ function fallbackLayout() {
         { key: 'tournament', label: 'Torneo', enabled: true, order: 40 },
         { key: 'news', label: 'Noticias', enabled: true, order: 50 },
         { key: 'elo', label: 'ELO', enabled: true, order: 60 },
-        { key: 'ev', label: 'EV+', enabled: true, order: 70 },
+        { key: 'ev', label: 'Valor', enabled: true, order: 70 },
         { key: 'model', label: 'Modelo', enabled: true, order: 80 },
         { key: 'stats', label: 'Stats', enabled: true, order: 90 },
       ],
@@ -2524,25 +2524,25 @@ function evHeroCard(opp) {
         <div class="ev-hero-metrics">
           <div class="ev-hero-metric">
             <span class="ev-hero-metric__value ${evHeat}">${fmtPct(opp.ev)}</span>
-            <span class="ev-hero-metric__label">EV</span>
+            <span class="ev-hero-metric__label">Valor estimado</span>
           </div>
           <div class="ev-hero-metric">
             <span class="ev-hero-metric__value">${fmtPct(opp.edge)}</span>
-            <span class="ev-hero-metric__label">Edge</span>
+            <span class="ev-hero-metric__label">Ventaja</span>
           </div>
           <div class="ev-hero-metric">
             <span class="ev-hero-metric__value">${opp.decimalOdds ? fmtNum(opp.decimalOdds) : '—'}</span>
             <span class="ev-hero-metric__label">Cuota</span>
           </div>
           <div class="ev-hero-metric">
-            <span class="ev-hero-metric__value">${fmtPct(opp.kellyFraction)}</span>
-            <span class="ev-hero-metric__label">Kelly%</span>
+            <span class="ev-hero-metric__value">${confPct != null ? confPct : '—'}</span>
+            <span class="ev-hero-metric__label">Confianza</span>
           </div>
         </div>
         <div class="ev-hero-tags">
           <span class="chip chip--warn">${escapeHtml(opp.marketLabel || opp.marketCode || '1X2')}</span>
           <span class="chip chip--blue">${escapeHtml(opp.selectionLabel || opp.selectionCode || '—')}</span>
-          ${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confidence: ${confPct}%">${confPct}</div>` : ''}
+          ${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confianza: ${confPct}/100">${confPct}</div>` : ''}
         </div>
         ${modelFactorsLine(opp)}
       </div>
@@ -2593,9 +2593,9 @@ function evOpportunityRow(opp) {
       <td class="ev-td-num ev-market-prob">${opp.marketProb != null ? fmtPct(opp.marketProb) : '—'}</td>
       <td class="ev-td-odds">${fairArrow}${overlay}</td>
       <td class="ev-td-num ${edgeHeat}">${opp.edge != null ? `${opp.edge >= 0 ? '+' : ''}${(opp.edge * 100).toFixed(1)}pp` : '—'}</td>
-      <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}${isOutlier ? ' <span class="chip chip--muted" title="EV outlier — modelo descalibrado">OUTLIER</span>' : ''}</td>
-      <td class="ev-td-num">${opp.kellyFraction != null ? `${fmtPct(opp.kellyFraction)}<br><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'Apostable' : opp.decisionStatus === 'PAPER_ONLY' ? 'Solo papel' : 'Bloqueado'}</span>` : '—'}</td>
-      <td class="ev-td-num">${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confidence: ${confPct}%">${confPct}</div>` : '—'}</td>
+      <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}${isOutlier ? ' <span class="chip chip--muted" title="Valor atípico: se descarta por precaución">ATÍPICO</span>' : ''}</td>
+      <td class="ev-td-num"><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'Valor alto' : opp.decisionStatus === 'PAPER_ONLY' ? 'En observación' : 'Bloqueado'}</span></td>
+      <td class="ev-td-num">${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confianza: ${confPct}/100">${confPct}</div>` : '—'}</td>
     </tr>`;
 }
 
@@ -2604,18 +2604,15 @@ function evSummaryBar(opportunities, blocked) {
   const paper = opportunities.filter((o) => o.decisionStatus === 'PAPER_ONLY').length;
   const evList = opportunities.map((o) => o.ev).filter((e) => e != null && !isNaN(e));
   const avgEV = evList.length ? evList.reduce((a, b) => a + b, 0) / evList.length : null;
-  const kellyList = opportunities.map((o) => o.kellyFraction).filter((k) => k != null && !isNaN(k));
-  const avgKelly = kellyList.length ? kellyList.reduce((a, b) => a + b, 0) / kellyList.length : null;
   const confList = opportunities.map((o) => o.confidenceScore).filter((c) => c != null && !isNaN(Number(c)));
   const avgConf = confList.length ? confList.reduce((a, b) => a + b, 0) / confList.length : null;
 
   const cards = [
-    { label: 'EV+ activos', value: opportunities.length, cls: `metric-card--hero${opportunities.length ? ' metric-card--blue' : ''}` },
-    { label: 'Apostables', value: bettable, cls: bettable ? 'metric-card--ok' : '' },
-    { label: 'Solo papel', value: paper, cls: paper ? 'metric-card--warn' : '' },
+    { label: 'Oportunidades de valor', value: opportunities.length, cls: `metric-card--hero${opportunities.length ? ' metric-card--blue' : ''}` },
+    { label: 'Valor alto', value: bettable, cls: bettable ? 'metric-card--ok' : '' },
+    { label: 'En observación', value: paper, cls: paper ? 'metric-card--warn' : '' },
     { label: 'Bloqueados', value: blocked.length, cls: '' },
-    { label: 'EV promedio', value: avgEV != null ? fmtPct(avgEV) : '—', cls: avgEV > 0 ? 'metric-card--ok' : '' },
-    { label: 'Kelly prom.', value: avgKelly != null ? fmtPct(avgKelly) : '—', cls: '' },
+    { label: 'Valor estimado prom.', value: avgEV != null ? fmtPct(avgEV) : '—', cls: avgEV > 0 ? 'metric-card--ok' : '' },
     { label: 'Confianza', value: avgConf != null ? fmtPct(avgConf) : '—', cls: avgConf != null && avgConf >= 0.6 ? 'metric-card--ok' : avgConf != null && avgConf >= 0.3 ? 'metric-card--warn' : '' },
   ];
   return `<div class="ev-summary-bar">${cards.map((c) => `
@@ -2667,7 +2664,7 @@ function attachBlockChipTooltips(container) {
 
 async function renderEV(options = {}) {
   if (!options.silent) {
-    root.innerHTML = `<div class="ev-view"><div class="loading-head"><span>Cargando EV+</span><i></i></div></div>`;
+    root.innerHTML = `<div class="ev-view"><div class="loading-head"><span>Cargando Valor</span><i></i></div></div>`;
   }
   let rawOpps = [], rawBlocked = [];
   try {
@@ -2686,7 +2683,7 @@ async function renderEV(options = {}) {
   const opportunities = rawOpps.map(adaptEVOpportunity);
   const blocked = rawBlocked.map(adaptBlockedDecision);
 
-  setStatus('EV+', `${opportunities.length} oportunidades`);
+  setStatus('Valor', `${opportunities.length} oportunidades`);
 
   const positiveEV = opportunities.filter((o) => (o.ev ?? 0) > 0);
   const negativeEV = opportunities.filter((o) => (o.ev ?? 0) <= 0 && o.decisionStatus !== 'BLOCKED');
@@ -2696,15 +2693,15 @@ async function renderEV(options = {}) {
     <th title="Probabilidad del modelo">MODELO</th>
     <th title="Probabilidad implícita de mercado">MERCADO</th>
     <th>CUOTA JUSTA → LIBRO</th>
-    <th title="Edge = Prob.modelo – Prob.mercado">EDGE</th>
-    <th title="EV = Prob.modelo × cuota – 1">EV</th>
-    <th>KELLY%</th>
-    <th title="Confidence score del modelo (0-100)">CONF.</th>
+    <th title="Ventaja = probabilidad del modelo − probabilidad del mercado">VENTAJA</th>
+    <th title="Valor estimado = probabilidad del modelo × cuota − 1">VALOR</th>
+    <th>ESTADO</th>
+    <th title="Confianza de la estimación (0-100)">CONF.</th>
   </tr></thead>`;
 
   const oppsHtml = positiveEV.length
     ? `<div class="ev-table-wrap"><table class="ev-table">${EV_TABLE_HEAD}<tbody>${positiveEV.map(evOpportunityRow).join('')}</tbody></table></div>`
-    : infoEmptyState('📊', 'Sin oportunidades EV+', 'Hoy el modelo no encuentra diferencias favorables frente a las cuotas del mercado. Aparecerán aquí cuando las haya.');
+    : infoEmptyState('📊', 'Sin oportunidades de valor', 'Hoy el modelo no encuentra diferencias favorables frente a las cuotas del mercado. Aparecerán aquí cuando las haya.');
 
   const overpricedHtml = negativeEV.length
     ? `<div class="ev-table-wrap"><table class="ev-table">${EV_TABLE_HEAD}<tbody>${negativeEV.map((o) => evOpportunityRow({ ...o, decisionStatus: 'BLOCKED' })).join('')}</tbody></table></div>`
@@ -2722,7 +2719,7 @@ async function renderEV(options = {}) {
       ${evHeroCard(bestOpp)}
       ${calibrationNote}
       <section>
-        <div class="ev-section-title">▲ Oportunidades con Edge</div>
+        <div class="ev-section-title">▲ Oportunidades de valor</div>
         ${oppsHtml}
       </section>
       <section>
@@ -2834,7 +2831,7 @@ function calibrationProgressBar(calibration) {
       <div class="cal-progress-track">
         <div class="cal-progress-fill${ready ? ' cal-progress-fill--ready' : ''}" style="width:${pct}%"></div>
       </div>
-      <div class="cal-progress-note">${ready ? '✓ Modelo listo para calibración automática' : `Faltan ${target - settled} picks resueltos para calibrar el modelo`}</div>
+      <div class="cal-progress-note">${ready ? '✓ Modelo listo para calibración automática' : `Faltan ${target - settled} resultados para calibrar el modelo`}</div>
     </div>`;
 }
 
@@ -2846,29 +2843,29 @@ function whatDoesThisMeanSection() {
         <div class="what-means-item">
           <span class="what-means-icon">📊</span>
           <div>
-            <strong>EV (Expected Value)</strong>
-            <p>Si el modelo dice 40% y la cuota implica 30%, hay +10pp de edge. EV = prob_modelo × cuota_decimal − 1. EV positivo = valor a largo plazo.</p>
+            <strong>Valor estimado</strong>
+            <p>Diferencia entre la probabilidad del modelo y la que implica el mercado. Si el modelo estima 40% y el mercado 30%, la ventaja es de +10 puntos. Valor estimado = probabilidad del modelo × cuota − 1.</p>
           </div>
         </div>
         <div class="what-means-item">
           <span class="what-means-icon">🎯</span>
           <div>
-            <strong>Kelly%</strong>
-            <p>Fracción óptima del bankroll a apostar según Kelly Criterion. Usamos Kelly×25% para reducir varianza. Nunca apostar el Kelly completo.</p>
+            <strong>Confianza</strong>
+            <p>Índice de 0 a 100 que resume cuántos datos respaldan la estimación (forma, cuotas, alineaciones, calibración de la liga). Más alto = estimación más sólida.</p>
           </div>
         </div>
         <div class="what-means-item">
           <span class="what-means-icon">⚖️</span>
           <div>
             <strong>Calibración</strong>
-            <p>Un modelo calibrado que dice 60% gana ~60% del tiempo. Sin calibración, el EV puede estar sesgado. Se necesitan 30+ picks para calibrar.</p>
+            <p>Un modelo calibrado que dice 60% gana ~60% del tiempo. Sin calibración, el EV puede estar sesgado. Se necesitan al menos 30 resultados para calibrar.</p>
           </div>
         </div>
         <div class="what-means-item">
           <span class="what-means-icon">🔒</span>
           <div>
-            <strong>PAPER vs BETTABLE</strong>
-            <p>PAPER = modelo aún no calibrado, solo seguimiento virtual. BETTABLE = modelo calibrado y confianza suficiente para apuesta real.</p>
+            <strong>Valor alto vs En observación</strong>
+            <p>En observación = el modelo de esa liga aún se está validando; la selección solo se sigue para medir su rendimiento. Valor alto = modelo calibrado y confianza suficiente.</p>
           </div>
         </div>
       </div>
@@ -2980,7 +2977,7 @@ function initCalibrationChart(calibrationData) {
 
 function roiByEvChart(buckets) {
   const id = 'roi-ev-chart';
-  if (!window.MA_STATS.roiByEvReadiness(buckets).points.length) return `<div class="chart-wrap">${infoEmptyState('📊', 'Sin datos', 'Se necesitan picks con resultado para calcular el ROI por rango de EV.')}</div>`;
+  if (!window.MA_STATS.roiByEvReadiness(buckets).points.length) return `<div class="chart-wrap">${infoEmptyState('📊', 'Sin datos', 'Se necesitan selecciones con resultado para calcular el rendimiento por rango de valor.')}</div>`;
   return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
 }
 
@@ -3003,7 +3000,7 @@ function initRoiChart(buckets) {
 
 function picksByStatusChart(summary) {
   const id = 'picks-donut-chart';
-  if (!summary.decisionRows.length) return `<div class="chart-wrap">${infoEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.')}</div>`;
+  if (!summary.decisionRows.length) return `<div class="chart-wrap">${infoEmptyState('🍩', 'Sin selecciones', 'No hay decisiones registradas aún.')}</div>`;
   return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
 }
 
@@ -3028,7 +3025,7 @@ function statsKpiBar(calibration, buckets) {
     { label: 'Brier Score', value: fmtNum(latest.brier_score, 4), cls: '' },
     { label: 'Log Loss', value: fmtNum(latest.log_loss, 4), cls: '' },
     { label: 'ECE', value: fmtNum(latest.ece, 4), cls: '' },
-    { label: 'ROI (stake del modelo)', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
+    { label: 'Rendimiento simulado', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
     { label: 'Muestra Brier / LL / ECE', value: latest.sample_size ?? 0, cls: '', help: 'sample_calibration' },
   ];
   return `<div class="kpi-bar">${cards.map((c) => `
@@ -3044,7 +3041,7 @@ function metricsHistoryChart(series) {
   if (!window.MA_STATS.historyReadiness(series).show) return infoEmptyState('📈', 'Sin datos en los últimos 30 días', 'La serie aparece cuando hay métricas diarias con resultados (Brier, log-loss, ECE, CLV o ROI).');
   return `
     <div class="chart-wrap"><canvas id="${id}" aria-label="${escapeHtml('Historial diario de métricas del modelo')}" role="img"></canvas></div>
-    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI (stake del modelo).')}</p>`;
+    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y rendimiento simulado.')}</p>`;
 }
 
 function initMetricsHistoryChart(series) {
@@ -3066,7 +3063,7 @@ function initMetricsHistoryChart(series) {
         line('Log-loss', 'log_loss', 'rgba(159,176,195,.9)', 'y'),
         line('ECE', 'ece', 'rgba(244,197,66,.9)', 'y'),
         line('CLV', 'clv_avg', 'rgba(30,215,96,.9)', 'y1', true),
-        line('ROI', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
+        line('Rendimiento simulado', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
       ],
     },
     options: {
@@ -3087,7 +3084,7 @@ function statsRoadmapEmpty() {
       <div class="stats-roadmap-header">
         <span class="stats-roadmap-icon">🗺️</span>
         <div>
-          <strong>Stats disponibles cuando haya picks resueltos</strong>
+          <strong>Stats disponibles cuando haya selecciones con resultado</strong>
           <p>Las métricas históricas y gráficos aparecen automáticamente una vez que los partidos predichos terminen y se liquiden.</p>
         </div>
       </div>
@@ -3098,15 +3095,15 @@ function statsRoadmapEmpty() {
         </div>
         <div class="stats-roadmap-step stats-roadmap-step--done">
           <span class="stats-step-dot stats-step-dot--done">✓</span>
-          <div><strong>EV calculado</strong><small>Decisiones de apuesta calculadas</small></div>
+          <div><strong>Valor calculado</strong><small>Evaluaciones calculadas</small></div>
         </div>
         <div class="stats-roadmap-step stats-roadmap-step--active">
           <span class="stats-step-dot stats-step-dot--active">→</span>
-          <div><strong>Picks en juego</strong><small>Esperando que terminen los partidos predichos</small></div>
+          <div><strong>Selecciones en juego</strong><small>Esperando que terminen los partidos predichos</small></div>
         </div>
         <div class="stats-roadmap-step">
           <span class="stats-step-dot">◯</span>
-          <div><strong>Resultados automáticos</strong><small>Resultados registrados y picks liquidados</small></div>
+          <div><strong>Resultados automáticos</strong><small>Resultados registrados y selecciones evaluadas</small></div>
         </div>
         <div class="stats-roadmap-step">
           <span class="stats-step-dot">◯</span>
@@ -3128,7 +3125,7 @@ const METRIC_HELP = {
   logloss: 'Penaliza especialmente las predicciones muy seguras que fallan. Menor es mejor.',
   ece: 'Qué tan bien calibradas están las probabilidades. Menor es mejor.',
   clv: 'Compara la cuota obtenida con la cuota de cierre del mercado. Positivo es mejor.',
-  roi: 'ROI simulado (sin dinero real) con el stake que sugiere el modelo para cada pick: ganancia ÷ total apostado. Difiere del Historial, que usa 1 unidad fija por pick.',
+  roi: 'Rendimiento de una simulación sin dinero real que pondera cada selección según la confianza del modelo (resultado ÷ total simulado). Difiere del Historial, que usa 1 unidad fija por selección.',
   sample_settled: 'Decisiones del sistema (una por predicción y selección) cuyo partido ya tiene resultado. Cada métrica indica debajo su propio n.',
   sample_calibration: 'Predicciones con resultado (una fila por selección: local, empate, visita) de la última calibración, de una liga y mercado. Brier, log-loss y ECE se calculan sobre ellas.',
   decisions: 'Una decisión es la evaluación de una selección de un partido (p. ej. Local en 1X2). Estado y resultado son dimensiones distintas: cada decisión tiene uno de cada.',
@@ -3182,7 +3179,7 @@ function performanceSummaryCard(summary) {
         <span class="perf-summary__n"><b>${escapeHtml(String(summary.settled))}</b> decisiones con resultado ${metricHelp('sample_settled')}</span>
       </header>
       <div class="kpi-bar perf-summary__kpis">
-        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">ROI (stake del modelo) ${metricHelp('roi')}</div>${nLine(summary.roiN, 'con stake')}</div>
+        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">Rendimiento simulado ${metricHelp('roi')}</div>${nLine(summary.roiN, 'simuladas')}</div>
         <div class="metric-card"><div class="metric-card__value">${summary.clv != null ? escapeHtml(fmtPctFrac(summary.clv)) : '—'}</div><div class="metric-card__label">${escapeHtml(clvLabel)} ${metricHelp('clv')}</div>${nLine(summary.clvN, 'con cierre')}</div>
         <div class="metric-card"><div class="metric-card__value">${escapeHtml(fmt4(summary.brier))}</div><div class="metric-card__label">Brier ${metricHelp('brier')}</div>${summary.brier != null ? nLine(summary.brierN, summary.brierScope ? `predicciones · ${summary.brierScope}` : 'predicciones') : ''}</div>
       </div>
@@ -3201,7 +3198,7 @@ function marketTechGrid(c) {
       <span>Diferencia vs mercado</span><b class="${diffCls}">${diff == null ? '—' : escapeHtml(`${diff > 0 ? '+' : ''}${Number(diff).toFixed(4)}`)}</b>
       <span>ECE</span><b>${escapeHtml(fmt4(c.model_ece))}</b>
       <span>CLV medio</span><b>${escapeHtml(fmtPctFrac(c.clv_avg))}</b>
-      <span>ROI (stake del modelo)</span><b>${escapeHtml(fmtPctFrac(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(fmtPctFrac(c.roi_ci_low))}, ${escapeHtml(fmtPctFrac(c.roi_ci_high))}]</small>` : ''}</b>
+      <span>Rendimiento simulado</span><b>${escapeHtml(fmtPctFrac(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(fmtPctFrac(c.roi_ci_low))}, ${escapeHtml(fmtPctFrac(c.roi_ci_high))}]</small>` : ''}</b>
       <span>n</span><b>${escapeHtml(String(c.n ?? 0))}</b>
     </div>`;
 }
@@ -3335,10 +3332,10 @@ function statsPerformancePanel(d) {
       ${picksStatusSection(d.decisions, d.totals, d.decisionsLimit)}
     </section>
     <section class="stats-section">
-      <h3>ROI por rango de EV</h3>
+      <h3>Rendimiento simulado por rango de valor</h3>
       ${roiReady.show ? roiByEvChart(d.buckets) : sampleEmptyState('⏳', roiReady.maturity, {
-        noData: ['Aún no hay resultados', 'El rendimiento por rango de EV aparecerá cuando haya picks con stake liquidados.'],
-        insufficient: ['Aún no hay suficientes resultados', 'Necesitamos más picks con stake liquidados para comparar el rendimiento por rango de EV.'],
+        noData: ['Aún no hay resultados', 'El rendimiento por rango de valor aparecerá cuando haya selecciones simuladas con resultado.'],
+        insufficient: ['Aún no hay suficientes resultados', 'Necesitamos más selecciones simuladas con resultado para comparar el rendimiento por rango de valor.'],
       })}
     </section>`;
 }

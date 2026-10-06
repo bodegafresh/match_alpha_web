@@ -15,8 +15,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=20261006i18n2">
-  <link rel="stylesheet" href="css/picks.css?v=20261006i18n2">
+  <link rel="stylesheet" href="css/styles.css?v=20261007f35">
+  <link rel="stylesheet" href="css/picks.css?v=20261007f35">
 </head>
 <body>
   <header class="topbar">
@@ -38,7 +38,7 @@
       <button class="tab" data-view="tournament" id="tab-tournament" type="button" role="tab" aria-controls="view-root" aria-selected="false">Torneo</button>
       <button class="tab" data-view="news" id="tab-news" type="button" role="tab" aria-controls="view-root" aria-selected="false">Noticias</button>
       <button class="tab" data-view="elo" id="tab-elo" type="button" role="tab" aria-controls="view-root" aria-selected="false">ELO</button>
-      <button class="tab tab--quant" data-view="ev" id="tab-ev" type="button" role="tab" aria-controls="view-root" aria-selected="false">EV+</button>
+      <button class="tab tab--quant" data-view="ev" id="tab-ev" type="button" role="tab" aria-controls="view-root" aria-selected="false">Valor</button>
       <button class="tab tab--quant" data-view="model" id="tab-model" type="button" role="tab" aria-controls="view-root" aria-selected="false">Modelo</button>
       <button class="tab tab--quant" data-view="stats" id="tab-stats" type="button" role="tab" aria-controls="view-root" aria-selected="false">Stats</button>
     </nav>
@@ -64,7 +64,7 @@
     <button class="bottom-tab" data-view="today" type="button"><span class="bottom-tab-icon" aria-hidden="true">⚽</span><span>Partidos</span></button>
     <button class="bottom-tab" data-view="standings" type="button"><span class="bottom-tab-icon" aria-hidden="true">☰</span><span>Tablas</span></button>
     <button class="bottom-tab" data-view="teams" type="button"><span class="bottom-tab-icon" aria-hidden="true">⛨</span><span>Equipos</span></button>
-    <button class="bottom-tab" data-view="ev" type="button"><span class="bottom-tab-icon" aria-hidden="true">◎</span><span>Picks</span></button>
+    <button class="bottom-tab" data-view="ev" type="button"><span class="bottom-tab-icon" aria-hidden="true">◎</span><span>Valor</span></button>
     <button class="bottom-tab" data-more type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="more-sheet"><span class="bottom-tab-icon" aria-hidden="true">⋯</span><span>Más</span></button>
   </nav>
   <div class="sheet-backdrop" id="more-backdrop" hidden></div>
@@ -90,18 +90,18 @@
     </form>
   </template>
 
-  <script src="js/config.js?v=20261006i18n2"></script>
-  <script src="js/i18n-dict.js?v=20261006i18n2"></script>
-  <script src="js/i18n.js?v=20261006i18n2"></script>
+  <script src="js/config.js?v=20261007f35"></script>
+  <script src="js/i18n-dict.js?v=20261007f35"></script>
+  <script src="js/i18n.js?v=20261007f35"></script>
   <!-- Chart.js is lazy-loaded by js/app.js (loadChartJs) only when the Stats view opens. -->
-  <script src="js/team-identity.js?v=20261006i18n2"></script>
-  <script src="js/stats-insights.js?v=20261006i18n2"></script>
-  <script src="js/probabilities.js?v=20261006i18n2"></script>
-  <script src="js/app.js?v=20261006i18n2"></script>
+  <script src="js/team-identity.js?v=20261007f35"></script>
+  <script src="js/stats-insights.js?v=20261007f35"></script>
+  <script src="js/probabilities.js?v=20261007f35"></script>
+  <script src="js/app.js?v=20261007f35"></script>
   <!-- Fase H: historial de picks, alertas push, aviso legal (views registered in window.MA_VIEWS) -->
-  <script src="js/csv.js?v=20261006i18n2"></script>
-  <script src="js/picks.js?v=20261006i18n2"></script>
-  <script src="js/push.js?v=20261006i18n2"></script>
-  <script src="js/legal.js?v=20261006i18n2"></script>
+  <script src="js/csv.js?v=20261007f35"></script>
+  <script src="js/picks.js?v=20261007f35"></script>
+  <script src="js/push.js?v=20261007f35"></script>
+  <script src="js/legal.js?v=20261007f35"></script>
 </body>
 </html>

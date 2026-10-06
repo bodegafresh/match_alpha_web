@@ -35,8 +35,8 @@
         <h2 id="legal-modal-title">Antes de continuar</h2>
         <ul>
           <li>Este sitio es <strong>solo para mayores de 18 años</strong> (o la edad legal de tu país).</li>
-          <li>Los picks y probabilidades son <strong>estimaciones estadísticas</strong> y pueden fallar. <strong>No es asesoría financiera</strong>.</li>
-          <li>Si apuestas, hazlo con responsabilidad y solo en operadores autorizados en tu país.</li>
+          <li>Las selecciones y probabilidades son <strong>estimaciones estadísticas</strong> y pueden fallar. <strong>No es asesoría financiera</strong>.</li>
+          <li>Match Alpha no ofrece ni promueve apuestas. Si decides apostar, hazlo con responsabilidad y solo con operadores autorizados en tu país.</li>
         </ul>
         <p><a href="legal/terms.html">Términos</a> · <a href="legal/privacy.html">Privacidad</a> · <a href="legal/responsible.html">Juego responsable y ayuda</a></p>
         <div class="legal-modal-actions">

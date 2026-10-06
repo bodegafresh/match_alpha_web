@@ -68,7 +68,7 @@
     const n = hasStaked
       ? bs.reduce((s, b) => s + (num(b.staked_settled_count) || 0), 0)
       : points.reduce((s, b) => s + (num(b.settled_count) || 0), 0);
-    const maturity = sampleMaturity(n, MIN_SAMPLE_SIZE, 'picks con stake liquidados');
+    const maturity = sampleMaturity(n, MIN_SAMPLE_SIZE, 'selecciones simuladas con resultado');
     return { show: maturity.sufficient && points.length > 0, maturity, points };
   }
 
@@ -185,7 +185,7 @@
   }
 
   const STATUS_LABELS = {
-    BETTABLE: 'Apostables', PAPER_ONLY: 'Solo papel', NO_EDGE: 'Sin ventaja', BLOCKED: 'Bloqueadas',
+    BETTABLE: 'Valor alto', PAPER_ONLY: 'En observación', NO_EDGE: 'Sin ventaja', BLOCKED: 'Bloqueadas',
   };
   const STATUS_ICONS = { BETTABLE: '✅', PAPER_ONLY: '📝', NO_EDGE: '➖', BLOCKED: '🚫' };
 

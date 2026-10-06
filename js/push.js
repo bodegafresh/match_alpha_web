@@ -176,13 +176,13 @@
     setStatus('Alertas', active ? 'notificaciones activas' : 'notificaciones apagadas');
     el.innerHTML = `<form class="pa-view" id="pa-form">
       <section class="card pa-card">
-        <h2>Notificaciones de picks</h2>
-        <p>Recibe un aviso cuando el modelo publique un pick con EV sobre tu umbral para tus equipos o competiciones favoritas
+        <h2>Notificaciones de selecciones</h2>
+        <p>Recibe un aviso cuando el modelo publique una selección con valor estimado sobre tu umbral para tus equipos o competiciones favoritas
         (si no eliges ninguno, recibes todos). Son estimaciones estadísticas, no asesoría financiera. Solo mayores de 18 años.</p>
         ${supportNotice()}
         <div class="pa-row">
-          <label>EV mínimo<select name="min_ev">${EV_OPTIONS.map((v) => `<option value="${v}"${v === fav.min_ev ? ' selected' : ''}>${Math.round(v * 100)}%</option>`).join('')}</select></label>
-          <label class="pa-check"><input type="checkbox" name="include_paper"${fav.include_paper ? ' checked' : ''}><span>Incluir picks <em>paper</em></span></label>
+          <label>Valor estimado mínimo<select name="min_ev">${EV_OPTIONS.map((v) => `<option value="${v}"${v === fav.min_ev ? ' selected' : ''}>${Math.round(v * 100)}%</option>`).join('')}</select></label>
+          <label class="pa-check"><input type="checkbox" name="include_paper"${fav.include_paper ? ' checked' : ''}><span>Incluir selecciones en observación</span></label>
         </div>
         <div class="pa-row">
           <label>Silencio desde${hourSelect('quiet_start', fav.quiet_start)}</label>
