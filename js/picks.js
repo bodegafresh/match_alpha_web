@@ -61,7 +61,7 @@
     const cards = [
       ['Picks', String(num(s.n)), `${num(s.n_graded)} resueltos`],
       ['Acierto', pct(s.hit_rate), 'ganados / resueltos'],
-      ['ROI (1u fija)', pct(s.roi), ci],
+      ['ROI (1 unidad por pick)', pct(s.roi), ci],
       ['Unidades', signed(s.profit_units), 'stake plano 1u'],
       ['CLV medio', s.clv_avg === null || s.clv_avg === undefined ? '—' : `${signed(num(s.clv_avg) * 100, 1)}%`, `${pct(s.clv_positive_rate, 0)} con CLV > 0`],
     ];

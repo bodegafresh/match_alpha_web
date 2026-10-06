@@ -15,6 +15,7 @@
       <nav aria-label="Legal">
         <a href="legal/terms.html">Términos</a>
         <a href="legal/responsible.html">Juego responsable</a>
+        <a href="legal/privacy.html">Privacidad</a>
         <button type="button" class="legal-footer-link" data-view-link="picks-history">Historial</button>
         <button type="button" class="legal-footer-link" data-view-link="alerts">Alertas</button>
       </nav>`;
@@ -37,7 +38,7 @@
           <li>Los picks y probabilidades son <strong>estimaciones estadísticas</strong> y pueden fallar. <strong>No es asesoría financiera</strong>.</li>
           <li>Si apuestas, hazlo con responsabilidad y solo en operadores autorizados en tu país.</li>
         </ul>
-        <p><a href="legal/terms.html">Términos</a> · <a href="legal/responsible.html">Juego responsable y ayuda</a></p>
+        <p><a href="legal/terms.html">Términos</a> · <a href="legal/privacy.html">Privacidad</a> · <a href="legal/responsible.html">Juego responsable y ayuda</a></p>
         <div class="legal-modal-actions">
           <button type="button" class="ph-btn" id="legal-accept">Tengo 18+ y acepto</button>
           <a class="ph-btn ph-btn--ghost" href="legal/responsible.html">Salir</a>

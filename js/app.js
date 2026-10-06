@@ -1,6 +1,14 @@
 const CFG = window.MATCH_ALPHA_CONFIG || {};
 const API_BASE_URL = String(CFG.API_BASE_URL || '').replace(/\/+$/, '');
-const SEASON = new URLSearchParams(location.search).get('season') || CFG.DEFAULT_SEASON || 'wc2026';
+// Competition: ?season= (league picker links) → last one the user picked → config default.
+const SEASON_STORAGE = 'ma_last_season';
+const SEASON = (() => {
+  const fromUrl = new URLSearchParams(location.search).get('season');
+  try {
+    if (fromUrl) localStorage.setItem(SEASON_STORAGE, fromUrl);
+    return fromUrl || localStorage.getItem(SEASON_STORAGE) || CFG.DEFAULT_SEASON || 'chile-primera-2026';
+  } catch { return fromUrl || CFG.DEFAULT_SEASON || 'chile-primera-2026'; }
+})();
 const KEY_STORAGE = CFG.KEY_STORAGE || 'poolteam2026'; // storage key name kept so saved keys survive; replaced by accounts (SaaS F4)
 const AUTO_REFRESH_MS = Number(CFG.AUTO_REFRESH_MS || 30000);
 const CHILE_TIMEZONE = 'America/Santiago';
@@ -477,7 +485,7 @@ async function apiGet(path, params = {}, options = {}) {
     } catch (err) {
       const isTimeout = err.name === 'TimeoutError' || timedOut();
       if (isTimeout && attempt === 1 && !options.signal?.aborted) {
-        setStatus('Despertando servidor…', 'reintentando');
+        setStatus('Conectando…', 'reintentando');
         continue;
       }
       if (isTimeout) {
@@ -2430,27 +2438,23 @@ const BLOCK_REASON_LABELS = {
   ODDS_STALE: 'Odds desactualizadas',
   LOW_LIQUIDITY: 'Liquidez baja',
   COMPETITION_NOT_BETTABLE: 'Competencia bloqueada',
-  LEGACY_IMPORT: 'Importación legacy',
-  ODDS_CAPTURED_AFTER_KICKOFF: 'Odds post-kickoff',
-  PAPER_ONLY_BACKFILL: 'Backfill histórico',
-  EV_OUTLIER: 'EV outlier (modelo descalibrado)',
+  LEGACY_IMPORT: 'Dato histórico',
+  ODDS_CAPTURED_AFTER_KICKOFF: 'Cuota posterior al inicio',
+  PAPER_ONLY_BACKFILL: 'Análisis histórico',
+  EV_OUTLIER: 'Valor atípico',
 };
 
 const BLOCK_REASON_DESC = {
-  NO_CALIBRATION: 'El modelo aún es RAW_ONLY. Se necesitan 30+ picks settled para calibrar.',
-  LOW_CONFIDENCE: 'El confidence score es menor a 0.30. Más datos de features o calibración mejorarán esto.',
-  ODDS_STALE: 'Las últimas odds capturadas tienen más de 2 horas. Permitido en PAPER_ONLY.',
-  LOW_LIQUIDITY: 'El mercado tiene liquidez baja. No recomendado para apuestas reales.',
-  COMPETITION_NOT_BETTABLE: 'Esta competencia está en modo OBSERVATION, no BETTABLE.',
-  LEGACY_IMPORT: 'Decisión importada de datos históricos. No ejecutable.',
-  ODDS_CAPTURED_AFTER_KICKOFF: 'Las odds fueron capturadas después del inicio del partido.',
-  PAPER_ONLY_BACKFILL: 'Decisión de backfill histórico. Solo para análisis.',
-  EV_OUTLIER: 'EV > 40% — estadísticamente imposible en mercados líquidos. Indica modelo descalibrado o datos de odds incorrectos.',
+  NO_CALIBRATION: 'El modelo de esta liga aún no está calibrado: necesita al menos 30 resultados.',
+  LOW_CONFIDENCE: 'La confianza de la predicción es baja (faltan datos del partido).',
+  ODDS_STALE: 'La última cuota disponible tiene más de 2 horas.',
+  LOW_LIQUIDITY: 'Mercado con poca liquidez: la cuota puede no ser representativa.',
+  COMPETITION_NOT_BETTABLE: 'Esta competición está en observación: el modelo aún se está validando.',
+  LEGACY_IMPORT: 'Registro importado de datos históricos.',
+  ODDS_CAPTURED_AFTER_KICKOFF: 'La cuota se registró después del inicio del partido.',
+  PAPER_ONLY_BACKFILL: 'Registro histórico, solo para análisis.',
+  EV_OUTLIER: 'Valor esperado mayor a 40%: muy improbable en mercados líquidos, se descarta por precaución.',
 };
-
-function quantEmptyState(icon, title, text) {
-  return `<div class="quant-empty"><div class="quant-empty__icon">${icon}</div><div class="quant-empty__title">${escapeHtml(title)}</div><div class="quant-empty__text">${escapeHtml(text)}</div></div>`;
-}
 
 function fmtPct(value) {
   if (value == null || isNaN(Number(value))) return '—';
@@ -2565,7 +2569,7 @@ function evOpportunityRow(opp) {
       <td class="ev-td-odds">${fairArrow}${overlay}</td>
       <td class="ev-td-num ${edgeHeat}">${opp.edge != null ? `${opp.edge >= 0 ? '+' : ''}${(opp.edge * 100).toFixed(1)}pp` : '—'}</td>
       <td class="ev-td-num ${evHeat}">${opp.ev != null ? fmtPct(opp.ev) : '—'}${isOutlier ? ' <span class="chip chip--muted" title="EV outlier — modelo descalibrado">OUTLIER</span>' : ''}</td>
-      <td class="ev-td-num">${opp.kellyFraction != null ? `${fmtPct(opp.kellyFraction)}<br><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'BETTABLE' : opp.decisionStatus === 'PAPER_ONLY' ? 'PAPER' : 'BLOCK'}</span>` : '—'}</td>
+      <td class="ev-td-num">${opp.kellyFraction != null ? `${fmtPct(opp.kellyFraction)}<br><span class="ev-kelly-label">${opp.decisionStatus === 'BETTABLE' ? 'Apostable' : opp.decisionStatus === 'PAPER_ONLY' ? 'Solo papel' : 'Bloqueado'}</span>` : '—'}</td>
       <td class="ev-td-num">${confPct != null ? `<div class="confidence-ring" data-level="${confLevel}" title="Confidence: ${confPct}%">${confPct}</div>` : '—'}</td>
     </tr>`;
 }
@@ -2582,8 +2586,8 @@ function evSummaryBar(opportunities, blocked) {
 
   const cards = [
     { label: 'EV+ activos', value: opportunities.length, cls: `metric-card--hero${opportunities.length ? ' metric-card--blue' : ''}` },
-    { label: 'Bettable', value: bettable, cls: bettable ? 'metric-card--ok' : '' },
-    { label: 'Paper', value: paper, cls: paper ? 'metric-card--warn' : '' },
+    { label: 'Apostables', value: bettable, cls: bettable ? 'metric-card--ok' : '' },
+    { label: 'Solo papel', value: paper, cls: paper ? 'metric-card--warn' : '' },
     { label: 'Bloqueados', value: blocked.length, cls: '' },
     { label: 'EV promedio', value: avgEV != null ? fmtPct(avgEV) : '—', cls: avgEV > 0 ? 'metric-card--ok' : '' },
     { label: 'Kelly prom.', value: avgKelly != null ? fmtPct(avgKelly) : '—', cls: '' },
@@ -2597,7 +2601,7 @@ function evSummaryBar(opportunities, blocked) {
 }
 
 function blockReasonsSection(blocked) {
-  if (!blocked.length) return quantEmptyState('🔒', 'Sin bloqueos activos', 'No hay decisiones bloqueadas en este momento.');
+  if (!blocked.length) return infoEmptyState('🔒', 'Sin bloqueos activos', 'No hay decisiones bloqueadas en este momento.');
   const counts = {};
   blocked.forEach((b) => b.blockReasons.forEach((r) => { counts[r] = (counts[r] || 0) + 1; }));
   const chips = Object.entries(counts).map(([reason, count]) => `
@@ -2675,14 +2679,14 @@ async function renderEV(options = {}) {
 
   const oppsHtml = positiveEV.length
     ? `<div class="ev-table-wrap"><table class="ev-table">${EV_TABLE_HEAD}<tbody>${positiveEV.map(evOpportunityRow).join('')}</tbody></table></div>`
-    : quantEmptyState('📊', 'Sin oportunidades EV+', 'El pipeline no encontró edge positivo en el mercado actual. Las oportunidades aparecen cuando el modelo ve valor vs las odds del libro.');
+    : infoEmptyState('📊', 'Sin oportunidades EV+', 'Hoy el modelo no encuentra diferencias favorables frente a las cuotas del mercado. Aparecerán aquí cuando las haya.');
 
   const overpricedHtml = negativeEV.length
     ? `<div class="ev-table-wrap"><table class="ev-table">${EV_TABLE_HEAD}<tbody>${negativeEV.map((o) => evOpportunityRow({ ...o, decisionStatus: 'BLOCKED' })).join('')}</tbody></table></div>`
-    : quantEmptyState('✅', 'Sin mercados sobrepreciados', 'No hay selecciones con EV negativo en este momento.');
+    : infoEmptyState('✅', 'Sin mercados sobrepreciados', 'No hay selecciones con EV negativo en este momento.');
 
   const calibrationNote = positiveEV.length && positiveEV.every((o) => o.predictionStatus === 'RAW_ONLY')
-    ? quantEmptyState('🔬', 'Modelo RAW_ONLY', 'El modelo aún no está calibrado. Se necesitan 30+ picks settled para calibrar. Las oportunidades mostradas son paper-only.')
+    ? infoEmptyState('🔬', 'Modelo en calibración', 'El modelo aún no está calibrado (necesita al menos 30 resultados). Las oportunidades se muestran solo como seguimiento.')
     : '';
 
   const bestOpp = positiveEV.length ? positiveEV.reduce((a, b) => ((b.ev ?? 0) > (a.ev ?? 0) ? b : a)) : null;
@@ -2752,13 +2756,18 @@ function feedbackTimeline() {
     ${i < steps.length - 1 ? '<span class="tl-arrow">→</span>' : ''}`).join('')}</div>`;
 }
 
+// User-facing names for internal model / method codes.
+const MODEL_NAME_LABEL = { poisson_elo_v1: 'Poisson + ELO', dixon_coles_v1: 'Dixon-Coles', lgbm_v1: 'Gradient boosting' };
+const MODEL_FAMILY_LABEL = { POISSON: 'Goles (Poisson)', DIXON_COLES: 'Goles (Dixon-Coles)', LIGHTGBM: 'Aprendizaje automático', LGBM: 'Aprendizaje automático' };
+const CALIBRATION_METHOD_LABEL = { ISOTONIC: 'Isotónica', PLATT: 'Platt', PENDING: 'Pendiente' };
+
 function modelStatusCards(diagnostics) {
-  if (!diagnostics.length) return quantEmptyState('🤖', 'Sin modelos registrados', 'El pipeline aún no ha registrado ningún modelo.');
+  if (!diagnostics.length) return infoEmptyState('🤖', 'Modelo en preparación', 'Todavía no hay un modelo activo para mostrar.');
   const champion = diagnostics.find((d) => d.champion_status === 'CHAMPION') || diagnostics[0];
   const cards = [
-    { label: 'Modelo activo', value: champion.model_name || '—', cls: 'metric-card--blue' },
+    { label: 'Modelo activo', value: MODEL_NAME_LABEL[champion.model_name] || 'Modelo estadístico', cls: 'metric-card--blue' },
     { label: 'Versión', value: champion.model_version || '—', cls: '' },
-    { label: 'Familia', value: champion.model_family || '—', cls: '' },
+    { label: 'Tipo', value: MODEL_FAMILY_LABEL[String(champion.model_family || '').toUpperCase()] || 'Estadístico', cls: '' },
     { label: 'Predicciones', value: champion.prediction_count ?? 0, cls: '' },
     { label: 'Corridas', value: champion.run_count ?? 0, cls: '' },
     { label: 'Drift severo', value: champion.severe_drift_reports ?? 0, cls: (champion.severe_drift_reports ?? 0) > 0 ? 'metric-card--danger' : '' },
@@ -2771,7 +2780,7 @@ function modelStatusCards(diagnostics) {
 }
 
 function calibrationSummaryText(calibration) {
-  if (!calibration.length) return quantEmptyState('🔬', 'Sin calibración', 'El modelo aún es RAW_ONLY. Se necesitan 30+ picks settled para calibrar.');
+  if (!calibration.length) return infoEmptyState('🔬', 'Sin calibración', 'El modelo aún no está calibrado: necesita al menos 30 resultados.');
   const latest = calibration[0];
   const n = latest.sample_size ?? 0;
   const lowN = n < 30;
@@ -2779,10 +2788,10 @@ function calibrationSummaryText(calibration) {
     <div class="cal-summary-row">
       <span>ECE: <b>${fmtNum(latest.ece, 4)}</b></span>
       <span>Brier: <b>${fmtNum(latest.brier_score, 4)}</b></span>
-      <span>Método: <b>${escapeHtml(latest.method || '—')}</b></span>
+      <span>Método: <b>${escapeHtml(CALIBRATION_METHOD_LABEL[String(latest.method || '').toUpperCase()] || '—')}</b></span>
       <span>n: <b>${n}</b></span>
     </div>
-    ${lowN ? '<div class="cal-warn">⚠️ Datos insuficientes — calibration chart disponible en Stats cuando n ≥ 30</div>' : ''}
+    ${lowN ? '<div class="cal-warn">⚠️ Datos insuficientes: el gráfico de calibración aparece en Stats con 30 resultados o más</div>' : ''}
     <p style="font-size:.78rem;color:var(--muted);margin:.6rem 0 0">Si el modelo dice 40%, debería ocurrir ~40% de las veces (ver Stats para gráfico completo)</p>`;
 }
 
@@ -2795,7 +2804,7 @@ function calibrationProgressBar(calibration) {
     <div class="cal-progress-wrap">
       <div class="cal-progress-header">
         <span class="cal-progress-title">Progreso de calibración</span>
-        <span class="cal-progress-count${ready ? ' cal-progress-count--ready' : ''}">${settled}/${target} picks settled</span>
+        <span class="cal-progress-count${ready ? ' cal-progress-count--ready' : ''}">${settled}/${target} resultados</span>
       </div>
       <div class="cal-progress-track">
         <div class="cal-progress-fill${ready ? ' cal-progress-fill--ready' : ''}" style="width:${pct}%"></div>
@@ -2917,7 +2926,7 @@ function destroyChart(id) {
 function calibrationBucketChart(calibrationData) {
   const id = 'cal-bucket-chart';
   const bins = Array.from({ length: 10 }, (_, i) => `${i * 10}-${i * 10 + 10}%`);
-  if (!calibrationData.length) return `<div class="chart-wrap">${quantEmptyState('📊', 'Sin datos de calibración', 'Se necesitan 30+ picks settled.')}</div>`;
+  if (!calibrationData.length) return `<div class="chart-wrap">${infoEmptyState('📊', 'Sin datos de calibración', 'Se necesitan al menos 30 resultados.')}</div>`;
   return `
     <div class="chart-wrap">
       <canvas id="${id}"></canvas>
@@ -2946,7 +2955,7 @@ function initCalibrationChart(calibrationData) {
 
 function roiByEvChart(buckets) {
   const id = 'roi-ev-chart';
-  if (!window.MA_STATS.roiByEvReadiness(buckets).points.length) return `<div class="chart-wrap">${quantEmptyState('📊', 'Sin datos', 'Se necesitan picks settled para calcular ROI por EV.')}</div>`;
+  if (!window.MA_STATS.roiByEvReadiness(buckets).points.length) return `<div class="chart-wrap">${infoEmptyState('📊', 'Sin datos', 'Se necesitan picks con resultado para calcular el ROI por rango de EV.')}</div>`;
   return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
 }
 
@@ -2969,7 +2978,7 @@ function initRoiChart(buckets) {
 
 function picksByStatusChart(summary) {
   const id = 'picks-donut-chart';
-  if (!summary.decisionRows.length) return `<div class="chart-wrap">${quantEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.')}</div>`;
+  if (!summary.decisionRows.length) return `<div class="chart-wrap">${infoEmptyState('🍩', 'Sin picks', 'No hay decisiones registradas aún.')}</div>`;
   return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
 }
 
@@ -2994,7 +3003,7 @@ function statsKpiBar(calibration, buckets) {
     { label: 'Brier Score', value: fmtNum(latest.brier_score, 4), cls: '' },
     { label: 'Log Loss', value: fmtNum(latest.log_loss, 4), cls: '' },
     { label: 'ECE', value: fmtNum(latest.ece, 4), cls: '' },
-    { label: 'ROI papel prom.', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
+    { label: 'ROI (stake del modelo)', value: totalROI != null ? `${fmtNum(totalROI, 1)}%` : '—', cls: totalROI > 0 ? 'metric-card--ok' : totalROI < 0 ? 'metric-card--danger' : '' },
     { label: 'Muestra Brier / LL / ECE', value: latest.sample_size ?? 0, cls: '', help: 'sample_calibration' },
   ];
   return `<div class="kpi-bar">${cards.map((c) => `
@@ -3007,10 +3016,10 @@ function statsKpiBar(calibration, buckets) {
 // F4.6: daily model metrics history (Brier, log-loss, ECE, CLV, paper ROI) — last 30 days.
 function metricsHistoryChart(series) {
   const id = 'metrics-history-chart';
-  if (!window.MA_STATS.historyReadiness(series).show) return statsEmptyState('📈', 'Sin datos en los últimos 30 días', 'La serie aparece cuando el loop diario registra métricas con resultados (Brier, log-loss, ECE, CLV o ROI).');
+  if (!window.MA_STATS.historyReadiness(series).show) return infoEmptyState('📈', 'Sin datos en los últimos 30 días', 'La serie aparece cuando hay métricas diarias con resultados (Brier, log-loss, ECE, CLV o ROI).');
   return `
     <div class="chart-wrap"><canvas id="${id}" aria-label="${escapeHtml('Historial diario de métricas del modelo')}" role="img"></canvas></div>
-    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI papel.')}</p>`;
+    <p style="font-size:.75rem;color:var(--muted);margin:.4rem 0 0">${escapeHtml('Eje izq.: Brier, log-loss, ECE (menor = mejor). Eje der.: CLV y ROI (stake del modelo).')}</p>`;
 }
 
 function initMetricsHistoryChart(series) {
@@ -3032,7 +3041,7 @@ function initMetricsHistoryChart(series) {
         line('Log-loss', 'log_loss', 'rgba(159,176,195,.9)', 'y'),
         line('ECE', 'ece', 'rgba(244,197,66,.9)', 'y'),
         line('CLV', 'clv_avg', 'rgba(30,215,96,.9)', 'y1', true),
-        line('ROI papel', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
+        line('ROI', 'paper_roi', 'rgba(255,99,117,.9)', 'y1', true),
       ],
     },
     options: {
@@ -3072,7 +3081,7 @@ function statsRoadmapEmpty() {
         </div>
         <div class="stats-roadmap-step">
           <span class="stats-step-dot">◯</span>
-          <div><strong>Settlement automático</strong><small>Resultados registrados y picks liquidados</small></div>
+          <div><strong>Resultados automáticos</strong><small>Resultados registrados y picks liquidados</small></div>
         </div>
         <div class="stats-roadmap-step">
           <span class="stats-step-dot">◯</span>
@@ -3094,7 +3103,7 @@ const METRIC_HELP = {
   logloss: 'Penaliza especialmente las predicciones muy seguras que fallan. Menor es mejor.',
   ece: 'Qué tan bien calibradas están las probabilidades. Menor es mejor.',
   clv: 'Compara la cuota obtenida con la cuota de cierre del mercado. Positivo es mejor.',
-  roi: 'Ganancia por unidad apostada en modo papel (simulado).',
+  roi: 'ROI simulado (sin dinero real) con el stake que sugiere el modelo para cada pick: ganancia ÷ total apostado. Difiere del Historial, que usa 1 unidad fija por pick.',
   sample_settled: 'Decisiones del sistema (una por predicción y selección) cuyo partido ya tiene resultado. Cada métrica indica debajo su propio n.',
   sample_calibration: 'Predicciones con resultado (una fila por selección: local, empate, visita) de la última calibración, de una liga y mercado. Brier, log-loss y ECE se calculan sobre ellas.',
   decisions: 'Una decisión es la evaluación de una selección de un partido (p. ej. Local en 1X2). Estado y resultado son dimensiones distintas: cada decisión tiene uno de cada.',
@@ -3120,11 +3129,11 @@ function sampleBadge(maturity) {
 // Empty state that tells "no observations" (NO_DATA) apart from "some, below the minimum" (INSUFFICIENT).
 function sampleEmptyState(icon, maturity, { noData, insufficient }) {
   const [title, text] = maturity.status === 'NO_DATA' ? noData : insufficient;
-  return statsEmptyState(icon, title, text, maturity.status === 'NO_DATA' ? null : maturity);
+  return infoEmptyState(icon, title, text, maturity.status === 'NO_DATA' ? null : maturity);
 }
 
-// Reusable "not enough data yet" state for charts/sections that need a sample to mean anything.
-function statsEmptyState(icon, title, text, maturity) {
+// The one rich empty state (icon + title + text, optional sample badge). emptyState() is the one-line variant.
+function infoEmptyState(icon, title, text, maturity) {
   return `
     <div class="quant-empty stats-empty">
       <div class="quant-empty__icon">${icon}</div>
@@ -3148,7 +3157,7 @@ function performanceSummaryCard(summary) {
         <span class="perf-summary__n"><b>${escapeHtml(String(summary.settled))}</b> decisiones con resultado ${metricHelp('sample_settled')}</span>
       </header>
       <div class="kpi-bar perf-summary__kpis">
-        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">ROI papel ${metricHelp('roi')}</div>${nLine(summary.roiN, 'con stake')}</div>
+        <div class="metric-card ${roiCls}"><div class="metric-card__value">${summary.roi != null ? `${fmtNum(summary.roi, 1)}%` : '—'}</div><div class="metric-card__label">ROI (stake del modelo) ${metricHelp('roi')}</div>${nLine(summary.roiN, 'con stake')}</div>
         <div class="metric-card"><div class="metric-card__value">${summary.clv != null ? escapeHtml(fmtPctFrac(summary.clv)) : '—'}</div><div class="metric-card__label">${escapeHtml(clvLabel)} ${metricHelp('clv')}</div>${nLine(summary.clvN, 'con cierre')}</div>
         <div class="metric-card"><div class="metric-card__value">${escapeHtml(fmt4(summary.brier))}</div><div class="metric-card__label">Brier ${metricHelp('brier')}</div>${summary.brier != null ? nLine(summary.brierN, summary.brierScope ? `predicciones · ${summary.brierScope}` : 'predicciones') : ''}</div>
       </div>
@@ -3167,7 +3176,7 @@ function marketTechGrid(c) {
       <span>Diferencia vs mercado</span><b class="${diffCls}">${diff == null ? '—' : escapeHtml(`${diff > 0 ? '+' : ''}${Number(diff).toFixed(4)}`)}</b>
       <span>ECE</span><b>${escapeHtml(fmt4(c.model_ece))}</b>
       <span>CLV medio</span><b>${escapeHtml(fmtPctFrac(c.clv_avg))}</b>
-      <span>ROI papel</span><b>${escapeHtml(fmtPctFrac(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(fmtPctFrac(c.roi_ci_low))}, ${escapeHtml(fmtPctFrac(c.roi_ci_high))}]</small>` : ''}</b>
+      <span>ROI (stake del modelo)</span><b>${escapeHtml(fmtPctFrac(c.roi))}${c.roi_ci_low != null ? ` <small>[${escapeHtml(fmtPctFrac(c.roi_ci_low))}, ${escapeHtml(fmtPctFrac(c.roi_ci_high))}]</small>` : ''}</b>
       <span>n</span><b>${escapeHtml(String(c.n ?? 0))}</b>
     </div>`;
 }
@@ -3194,7 +3203,7 @@ function marketVerdictCard(c, { open = false } = {}) {
 }
 
 function marketVerdictList(cards, options) {
-  if (!cards.length) return quantEmptyState('📊', 'Sin métricas por mercado', 'Se generan con el job market_stage_metrics.');
+  if (!cards.length) return infoEmptyState('📊', 'Sin métricas por mercado', 'Aparecerán cuando haya partidos con resultado y cuotas para comparar.');
   return `<div class="market-card-grid">${cards.map((c) => marketVerdictCard(c, options)).join('')}</div>`;
 }
 
@@ -3240,7 +3249,7 @@ function aiImpactCard(policy, track) {
         ${items.length ? `<ul class="ai-case-list">${items.map(aiCaseRow).join('')}</ul>` : '<p class="perf-summary__note">Sin ajustes de IA liquidados aún.</p>'}
         <div class="market-card__grid">
           <span>alpha (peso IA)</span><b>${escapeHtml(Number(policy.alpha || 0).toFixed(2))}</b>
-          <span>n liquidados IA</span><b>${escapeHtml(String(policy.n_settled ?? 0))}</b>
+          <span>Partidos evaluados (IA)</span><b>${escapeHtml(String(policy.n_settled ?? 0))}</b>
           <span>Estado</span><b>${escapeHtml(window.MA_STATS.reasonLabel(reason) || '—')}</b>
           ${policy.p_value != null ? `<span>p-valor (test de signo)</span><b>${escapeHtml(Number(policy.p_value).toFixed(3))}</b>` : ''}
           ${reason ? `<span>Código</span><b><code>${escapeHtml(reason)}</code></b>` : ''}
@@ -3250,14 +3259,14 @@ function aiImpactCard(policy, track) {
 }
 
 function aiImpactList(policies, track) {
-  if (!policies.length) return quantEmptyState('🤖', 'Sin política de IA', 'Se crea con el job ai_policy_update.');
+  if (!policies.length) return infoEmptyState('🤖', 'IA sin evaluar aún', 'La evaluación de la IA aparece cuando haya partidos con resultado.');
   const trackBy = new Map(track.map((t) => [t.competition, t]));
   return `<div class="market-card-grid">${policies.map((p) => aiImpactCard(p, trackBy.get(p.competition) || {})).join('')}</div>`;
 }
 
 function picksStatusSection(decisions, totals, limit) {
   const s = window.MA_STATS.pickStatusSummary(decisions, totals, limit);
-  if (!s.total) return statsEmptyState('🍩', 'Sin decisiones', 'No hay decisiones registradas aún.');
+  if (!s.total) return infoEmptyState('🍩', 'Sin decisiones', 'No hay decisiones registradas aún.');
   const scope = s.source === 'all' ? `${s.total} decisiones en total` : `Últimas ${s.total} decisiones`;
   return `
     <p class="perf-summary__note">${escapeHtml(scope)} ${metricHelp('decisions')}</p>
@@ -3320,7 +3329,7 @@ function statsModelPanel(d) {
       insufficient: ['Recopilando resultados', 'La calibración por tramos necesita más predicciones con resultado para ser interpretable.'],
     });
   }
-  else if (!hasBuckets) calibrationHtml = statsEmptyState('📊', 'Calibración por tramos no disponible', 'El servidor todavía no entrega la tasa observada por tramo; se muestran Brier, log-loss y ECE arriba.');
+  else if (!hasBuckets) calibrationHtml = infoEmptyState('📊', 'Calibración por tramos no disponible', 'El servidor todavía no entrega la tasa observada por tramo; se muestran Brier, log-loss y ECE arriba.');
   else calibrationHtml = calibrationBucketChart(d.calibration);
   return `
     <section class="stats-section">
@@ -3512,16 +3521,8 @@ async function render(options = {}) {
   if (state.activeController) state.activeController.abort();
   state.activeController = new AbortController();
   const renderOptions = { ...options, signal: state.activeController.signal };
-  if (state.view === 'identity') {
-    setStatus('Admin · identidad');
-    if (options.silent) return;
-    await loadIdentityQueue(adminState.offset || 0);
-    return;
-  }
-  if (state.view === 'ops') {
-    setStatus('Admin · operación');
-    if (options.silent) return;
-    await loadOpsView();
+  if (isAdminView(state.view)) {
+    await window.MA_ADMIN.render(state.view, options);
     return;
   }
   try {
@@ -4343,335 +4344,16 @@ window.addEventListener('offline', () => setOfflineBanner(true));
   });
 })();
 
+// Admin views (identity queue, ops) live in js/admin.js, loaded only with ?admin=1 so the public bundle
+// ships no admin code. admin.js registers window.MA_ADMIN = { isAdminView, render }.
+function isAdminView(view) { return Boolean(window.MA_ADMIN && window.MA_ADMIN.isAdminView(view)); }
 
-// ─── Admin: identity review queue (hidden; ?admin=1) ─────────────────────────
-// The internal key lives in sessionStorage only (never localStorage, never the read key) and is sent as
-// X-Internal-Key exclusively to /admin/* endpoints. sw.js never caches requests carrying X-Internal-Key
-// (and only caches GET /api/v1/web/*), so admin responses are never stored offline.
-
-const ADMIN_KEY_STORAGE = 'ma_admin_internal_key';
-const ADMIN_ENABLED = new URLSearchParams(location.search).get('admin') === '1';
-function isAdminView(view) { return view === 'identity' || view === 'ops'; }
-const adminState = { items: [], offset: 0, total: null, hasMore: false, nextOffset: null, busy: false, msg: '' };
-
-function adminKey() { try { return sessionStorage.getItem(ADMIN_KEY_STORAGE) || ''; } catch { return ''; } }
-function setAdminKey(value) { try { sessionStorage.setItem(ADMIN_KEY_STORAGE, value || ''); } catch { /* private mode */ } }
-function clearAdminKey() { try { sessionStorage.removeItem(ADMIN_KEY_STORAGE); } catch { /* ignore */ } }
-
-async function adminFetch(path, { method = 'GET', params = {}, body = null } = {}) {
-  const clean = String(path).replace(/^\/+/, '');
-  if (!clean.startsWith('admin/')) throw new Error('Ruta admin inválida');
-  const key = adminKey();
-  if (!key) throw Object.assign(new Error('Falta clave interna'), { name: 'AdminAuth' });
-  const url = new URL(`${API_BASE_URL}/${clean}`);
-  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v); });
-  const headers = { 'X-Internal-Key': key };
-  if (body) headers['Content-Type'] = 'application/json';
-  const { signal, cancel } = requestSignal(null, REQUEST_TIMEOUT_MS);
-  let response;
-  try {
-    response = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal, cache: 'no-store', credentials: 'omit' });
-  } finally {
-    cancel();
-  }
-  const json = await response.json().catch(() => ({}));
-  if (response.status === 401 || response.status === 403) {
-    clearAdminKey();
-    throw Object.assign(new Error('Clave interna inválida'), { name: 'AdminAuth' });
-  }
-  if (!response.ok || json.ok === false) {
-    const detail = json.detail || json.error || json.message;
-    throw new Error(typeof detail === 'string' ? detail : `HTTP ${response.status}`);
-  }
-  return 'data' in json ? (json.data || {}) : json;
-}
-
-function renderAdminKeyPrompt(message = '') {
-  root.innerHTML = `
-    <form class="login-box admin-key-box" id="admin-key-form" autocomplete="off">
-      <h2>Admin · acceso</h2>
-      <p>Ingresa la <strong>clave interna</strong>. Se guarda solo en esta pestaña (sessionStorage) y se envía únicamente a /admin/*.</p>
-      <label for="admin-key-input" class="sr-only">Clave interna</label>
-      <input id="admin-key-input" type="password" placeholder="Clave interna" autocomplete="off" spellcheck="false">
-      <button type="submit">Entrar</button>
-      <small>${escapeHtml(message)}</small>
-    </form>`;
-  $('#admin-key-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const value = $('#admin-key-input').value.trim();
-    if (!value) return;
-    setAdminKey(value);
-    if (state.view === 'ops') loadOpsView(); else loadIdentityQueue(0);
-  });
-  $('#admin-key-input').focus();
-}
-
-function adminSide(label, side) {
-  const s = side || {};
-  const photo = s.photo ? safeUrl(s.photo) : '#';
-  const teams = Array.isArray(s.teams) ? s.teams : [];
-  return `
-    <div class="idq-side">
-      <div class="idq-side-head">
-        ${photo !== '#' ? `<img class="idq-photo" src="${escapeHtml(photo)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" width="56" height="56">` : '<span class="idq-photo idq-photo--empty" aria-hidden="true"></span>'}
-        <div>
-          <div class="idq-label">${escapeHtml(label)}</div>
-          <div class="idq-name">${escapeHtml(s.name || '—')}</div>
-          <div class="idq-id">id ${escapeHtml(s.id || '—')}</div>
-        </div>
-      </div>
-      <dl class="idq-dl">
-        <dt>Nacimiento</dt><dd>${escapeHtml(s.dob || '—')}</dd>
-        <dt>Nacionalidad</dt><dd>${escapeHtml(s.nat || '—')}</dd>
-        <dt>Equipos</dt><dd>${teams.length ? teams.map((t) => escapeHtml(t)).join(', ') : '—'}</dd>
-        <dt>Partidos</dt><dd>${num(s.matches)}</dd>
-      </dl>
-    </div>`;
-}
-
-function adminCard(item) {
-  const ev = item.evidence || {};
-  const lu = ev.lineup || {};
-  const candidates = Array.isArray(item.candidates) ? item.candidates.map(String) : [];
-  const needsChoice = item.kind !== 'MULTI_ID_SAME_SOURCE' && candidates.length > 0;
-  const decision = ev.decision ? `${ev.decision} · ${num(ev.confidence).toFixed(2)}` : 'sin sugerencia';
-  const choice = needsChoice ? `
-      <fieldset class="idq-choice"><legend>Fusionar en</legend>
-        ${candidates.map((c, i) => `<label><input type="radio" name="idq-cand-${escapeHtml(item.id)}" value="${escapeHtml(c)}" ${i === 0 ? 'checked' : ''}> ${escapeHtml(c)}</label>`).join('')}
-      </fieldset>` : '';
-  const etype = String(item.entity_type || '').toUpperCase();
-  const sameLabel = etype === 'VENUE' ? 'Mismo estadio' : etype === 'TEAM' ? 'Mismo equipo' : 'Misma persona';
-  const diffLabel = etype === 'VENUE' ? 'Distintos' : etype === 'TEAM' ? 'Distintos' : 'Distintas';
-  const canSplit = etype === 'PLAYER';
-  return `
-    <article class="idq-card" data-id="${escapeHtml(item.id)}">
-      <header class="idq-head">
-        <strong>${escapeHtml(item.name || '—')}</strong>
-        <span class="chip chip--muted">${escapeHtml(item.entity_type || '')} · ${escapeHtml(item.source || '')}</span>
-        <span class="chip chip--muted">${escapeHtml(item.kind || '')}</span>
-      </header>
-      <p class="idq-suggest">Sugerencia: <strong>${escapeHtml(decision)}</strong> <span class="idq-rule">${escapeHtml(ev.rule || '')}</span></p>
-      ${ev.primary || ev.extra ? `<div class="idq-sides">${adminSide('Id principal', ev.primary)}${adminSide('Id extra', ev.extra)}</div>` : ''}
-      ${ev.lineup ? `<p class="idq-lineup">Partidos compartidos (mismo equipo): <strong>${num(lu.shared_matches)}</strong> · dorsal/posición coincide: ${num(lu.agree_matches)} · mismo partido, slots distintos: <strong>${num(lu.distinct_slot_matches)}</strong></p>` : ''}
-      ${ev.schedule_conflict ? '<p class="idq-warn">Conflicto de calendario</p>' : ''}
-      ${ev.concurrent_teams ? '<p class="idq-warn">Clubes simultáneos</p>' : ''}
-      ${choice}
-      <div class="idq-actions">
-        <button type="button" class="idq-btn idq-btn--same" data-act="approve">${escapeHtml(sameLabel)}</button>
-        <button type="button" class="idq-btn idq-btn--diff" data-act="reject"${canSplit ? '' : ' disabled title="Separar solo está disponible para jugadores; corrige estadios/equipos con SQL o merge"'}>${escapeHtml(diffLabel)}</button>
-        <button type="button" class="idq-btn idq-btn--skip" data-act="skip">Saltar</button>
-      </div>
-    </article>`;
-}
-
-function renderIdentityQueue() {
-  const items = adminState.items;
-  const total = adminState.total == null ? '' : ` de ${num(adminState.total)}`;
-  root.innerHTML = `
-    <div class="idq-view">
-      <div class="idq-toolbar">
-        <h2 class="section-title">Identidad · cola de revisión</h2>
-        <span class="idq-count">${num(items.length)} visibles${escapeHtml(total)} · desde ${num(adminState.offset)}</span>
-        <button type="button" class="idq-btn idq-btn--skip" id="idq-reload">Recargar</button>
-        ${adminState.hasMore ? '<button type="button" class="idq-btn idq-btn--skip" id="idq-next">Siguientes</button>' : ''}
-        <button type="button" class="idq-btn idq-btn--skip" id="idq-logout">Olvidar clave</button>
-      </div>
-      ${adminState.msg ? `<p class="idq-msg" role="status">${escapeHtml(adminState.msg)}</p>` : ''}
-      ${items.length ? items.map(adminCard).join('') : '<p class="empty-state">No hay ítems abiertos en esta página.</p>'}
-    </div>`;
-  $('#idq-reload')?.addEventListener('click', () => loadIdentityQueue(adminState.offset));
-  $('#idq-next')?.addEventListener('click', () => loadIdentityQueue(adminState.nextOffset || 0));
-  $('#idq-logout')?.addEventListener('click', () => { clearAdminKey(); renderAdminKeyPrompt('Clave olvidada.'); });
-  root.querySelectorAll('.idq-card [data-act]').forEach((button) => {
-    button.addEventListener('click', () => decideIdentityItem(button.closest('.idq-card').dataset.id, button.dataset.act));
-  });
-}
-
-async function loadIdentityQueue(offset = 0) {
-  if (!adminKey()) { renderAdminKeyPrompt(); return; }
-  root.innerHTML = skeletonCards(4);
-  try {
-    const data = await adminFetch('admin/identity-queue', { params: { status: 'OPEN', limit: 25, offset: Math.max(0, num(offset)) } });
-    adminState.items = Array.isArray(data.items) ? data.items : [];
-    adminState.offset = num(data.offset, 0);
-    adminState.total = data.total == null ? null : num(data.total);
-    adminState.hasMore = Boolean(data.has_more);
-    adminState.nextOffset = data.next_offset == null ? null : num(data.next_offset);
-    adminState.msg = '';
-    renderIdentityQueue();
-  } catch (error) {
-    if (error.name === 'AdminAuth') renderAdminKeyPrompt(error.message);
-    else { adminState.msg = `Error: ${error.message}`; renderIdentityQueue(); }
-  }
-}
-
-async function decideIdentityItem(id, act) {
-  const index = adminState.items.findIndex((it) => it.id === id);
-  if (index < 0) return;
-  const item = adminState.items[index];
-  // Optimistic: remove the card now, restore it if the call fails.
-  adminState.items.splice(index, 1);
-  if (act === 'skip') { adminState.items.push(item); adminState.msg = `Saltado: ${item.name || id}`; renderIdentityQueue(); return; }
-  adminState.msg = `${act === 'approve' ? 'Iguales' : 'Distintos'}: ${item.name || id}…`;
-  renderIdentityQueue();
-  const body = { actor: 'web-admin' };
-  if (act === 'approve') {
-    const picked = document.querySelector(`input[name="idq-cand-${CSS.escape(id)}"]:checked`)?.value;
-    const entityId = item.kind === 'MULTI_ID_SAME_SOURCE' ? item.evidence?.player_id : picked || (item.candidates || [])[0];
-    if (entityId) body.entity_id = String(entityId);
-  }
-  try {
-    const out = await adminFetch(`admin/identity-queue/${encodeURIComponent(id)}/${act === 'approve' ? 'approve' : 'reject'}`, { method: 'POST', body });
-    adminState.msg = `OK ${out.action || out.status || ''}: ${item.name || id}`;
-    if (adminState.total != null) adminState.total = Math.max(0, adminState.total - 1);
-  } catch (error) {
-    adminState.items.splice(Math.min(index, adminState.items.length), 0, item);
-    adminState.msg = `No se pudo guardar (${error.message}); el ítem volvió a la lista.`;
-    if (error.name === 'AdminAuth') { renderAdminKeyPrompt(error.message); return; }
-  }
-  if (state.view === 'identity') renderIdentityQueue();
-}
-
-function openAdminView(view) {
-  closeMoreSheet();
-  state.view = view;
-  document.querySelectorAll('.tab').forEach((t) => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
-  document.querySelectorAll('.bottom-tab, .more-item').forEach((t) => { t.classList.remove('active'); t.removeAttribute('aria-current'); });
-  hideDateFilterBar();
-  window.scrollTo({ top: 0 });
+if (new URLSearchParams(location.search).get('admin') === '1') {
+  const script = document.createElement('script');
+  script.src = `js/admin.js?v=${encodeURIComponent((document.querySelector('script[src*="js/app.js"]')?.src.split('v=')[1]) || '')}`;
+  script.onload = () => render();
+  script.onerror = () => render();
+  document.head.append(script);
+} else {
   render();
 }
-
-// ─── Admin: operación (ops incidents + health; hidden; ?admin=1, same key/session rules) ─────
-const opsState = { incidents: [], health: null, filter: 'OPEN', mode: 'light', msg: '', busy: false };
-const OPS_SEV_CLASS = { CRITICAL: 'ops-sev--crit', WARN: 'ops-sev--warn', INFO: 'ops-sev--info' };
-
-function opsPlain(text) {
-  // check messages only use <b>; strip tags and render as escaped text
-  return escapeHtml(String(text || '').replace(/<\/?b>/g, ''));
-}
-
-function opsWhen(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-}
-
-function opsCard(label, value, hint = '', tone = '') {
-  return `<div class="ops-card ${tone}"><div class="ops-card-label">${escapeHtml(label)}</div><div class="ops-card-value">${escapeHtml(String(value))}</div>${hint ? `<div class="ops-card-hint">${escapeHtml(hint)}</div>` : ''}</div>`;
-}
-
-function opsIncidentRow(it) {
-  const sev = String(it.severity || 'INFO').toUpperCase();
-  const details = it.details && typeof it.details === 'object' ? it.details : {};
-  const open = it.status === 'OPEN';
-  return `
-    <article class="ops-inc ${open ? '' : 'ops-inc--resolved'}" data-id="${escapeHtml(String(it.id))}">
-      <header class="ops-inc-head">
-        <span class="ops-sev ${OPS_SEV_CLASS[sev] || ''}">${escapeHtml(sev)}</span>
-        <strong class="ops-inc-title">${escapeHtml(it.title || it.dedupe_key || '')}</strong>
-        <span class="chip chip--muted">${escapeHtml(it.status || '')}${it.acked_at ? ' · ack' : ''}</span>
-      </header>
-      ${details.message ? `<p class="ops-inc-msg">${opsPlain(details.message)}</p>` : ''}
-      ${details.action ? `<p class="ops-inc-action">👉 ${escapeHtml(details.action)}</p>` : ''}
-      <p class="ops-inc-meta">${escapeHtml(it.check_name || '')} · visto ${escapeHtml(opsWhen(it.last_seen))} · ×${num(it.count, 1)} · desde ${escapeHtml(opsWhen(it.first_seen))}${it.resolved_at ? ` · resuelto ${escapeHtml(opsWhen(it.resolved_at))}` : ''}</p>
-      ${open && !it.acked_at ? '<div class="ops-inc-actions"><button type="button" class="idq-btn idq-btn--skip" data-ack="1">Ack (silenciar)</button></div>' : ''}
-    </article>`;
-}
-
-function renderOpsView() {
-  const h = opsState.health || {};
-  const inc = h.incidents || null;
-  const counts = h.counts || {};
-  const db = h.db_errors_1h || {};
-  const routes = Array.isArray(h.routes) ? h.routes : [];
-  const findings = Array.isArray(h.findings) ? h.findings : [];
-  const cards = [
-    opsCard('Incidentes abiertos', inc ? num(inc.open) : '—', inc ? `🚨 ${num(inc.open_critical)} · ⚠️ ${num(inc.open_warn)}` : 'migración 046 pendiente', inc && num(inc.open_critical) ? 'ops-card--crit' : ''),
-    opsCard('Hallazgos ahora', findings.length, `🚨 ${num(counts.CRITICAL)} · ⚠️ ${num(counts.WARN)} · ℹ️ ${num(counts.INFO)} (${opsState.mode})`, num(counts.CRITICAL) ? 'ops-card--crit' : ''),
-    opsCard('Notificados 24 h', inc ? num(inc.notified_24h) : '—', inc ? `resueltos ${num(inc.resolved_24h)}` : ''),
-    opsCard('Errores DB 1 h', num(db.total), Object.entries(db.by_kind || {}).map(([k, v]) => `${k} ${v}`).join(' · ')),
-  ].join('');
-  const slow = routes.slice(0, 5).map((r) => `<li><span class="ops-route">${escapeHtml(r.route)}</span> p95 ${num(r.p95_ms)} ms · n ${num(r.count)}${num(r.errors_5xx) ? ` · 5xx ${num(r.errors_5xx)}` : ''}</li>`).join('');
-  const checkErrors = Object.keys(h.check_errors || {});
-  const now = findings.slice(0, 12).map((f) => `<li><span class="ops-sev ${OPS_SEV_CLASS[f.severity] || ''}">${escapeHtml(f.severity)}</span> ${escapeHtml(f.title)}</li>`).join('');
-  root.innerHTML = `
-    <div class="idq-view ops-view">
-      <div class="idq-toolbar">
-        <h2 class="section-title">Operación</h2>
-        <button type="button" class="idq-btn idq-btn--skip" id="ops-reload">Recargar</button>
-        <button type="button" class="idq-btn idq-btn--skip" id="ops-full">${opsState.mode === 'full' ? 'Chequeo liviano' : 'Chequeo completo'}</button>
-        <button type="button" class="idq-btn idq-btn--skip" id="ops-filter">${opsState.filter === 'OPEN' ? 'Ver todos' : 'Solo abiertos'}</button>
-        <button type="button" class="idq-btn idq-btn--skip" id="ops-identity">Identidad</button>
-      </div>
-      ${opsState.msg ? `<p class="idq-msg" role="status">${escapeHtml(opsState.msg)}</p>` : ''}
-      <div class="ops-cards">${cards}</div>
-      ${checkErrors.length ? `<p class="idq-warn">Checks con error: ${escapeHtml(checkErrors.join(', '))}</p>` : ''}
-      ${now ? `<section class="ops-section"><h3>Hallazgos del chequeo (sin enviar)</h3><ul class="ops-list">${now}</ul></section>` : ''}
-      ${slow ? `<section class="ops-section"><h3>Rutas más lentas (1 h, este worker)</h3><ul class="ops-list">${slow}</ul></section>` : ''}
-      <section class="ops-section"><h3>Incidentes ${opsState.filter === 'OPEN' ? 'abiertos' : '(todos)'}</h3>
-        ${opsState.incidents.length ? opsState.incidents.map(opsIncidentRow).join('') : '<p class="empty-state">Sin incidentes.</p>'}
-      </section>
-    </div>`;
-  $('#ops-reload')?.addEventListener('click', () => loadOpsView());
-  $('#ops-full')?.addEventListener('click', () => { opsState.mode = opsState.mode === 'full' ? 'light' : 'full'; loadOpsView(); });
-  $('#ops-filter')?.addEventListener('click', () => { opsState.filter = opsState.filter === 'OPEN' ? '' : 'OPEN'; loadOpsView(); });
-  $('#ops-identity')?.addEventListener('click', () => openAdminView('identity'));
-  root.querySelectorAll('.ops-inc [data-ack]').forEach((button) => {
-    button.addEventListener('click', () => ackOpsIncident(button.closest('.ops-inc').dataset.id));
-  });
-}
-
-async function loadOpsView() {
-  if (!adminKey()) { renderAdminKeyPrompt(); return; }
-  root.innerHTML = skeletonCards(4);
-  opsState.msg = '';
-  const [health, incidents] = await Promise.allSettled([
-    adminFetch('admin/ops/health', { params: { mode: opsState.mode } }),
-    adminFetch('admin/ops/incidents', { params: { status: opsState.filter, limit: 50 } }),
-  ]);
-  const authError = [health, incidents].find((r) => r.status === 'rejected' && r.reason?.name === 'AdminAuth');
-  if (authError) { renderAdminKeyPrompt(authError.reason.message); return; }
-  opsState.health = health.status === 'fulfilled' ? health.value : null;
-  opsState.incidents = incidents.status === 'fulfilled' && Array.isArray(incidents.value.items) ? incidents.value.items : [];
-  const errors = [health, incidents].filter((r) => r.status === 'rejected').map((r) => r.reason?.message || 'error');
-  if (errors.length) opsState.msg = `Error: ${errors.join(' · ')}`;
-  if (state.view === 'ops') renderOpsView();
-}
-
-async function ackOpsIncident(id) {
-  if (opsState.busy) return;
-  opsState.busy = true;
-  try {
-    await adminFetch(`admin/ops/incidents/${encodeURIComponent(id)}/ack`, { method: 'POST', body: { by: 'web-admin' } });
-    const it = opsState.incidents.find((x) => String(x.id) === String(id));
-    if (it) it.acked_at = new Date().toISOString();
-    opsState.msg = 'Incidente silenciado (ack). Se resolverá solo cuando el check pase.';
-  } catch (error) {
-    if (error.name === 'AdminAuth') { opsState.busy = false; renderAdminKeyPrompt(error.message); return; }
-    opsState.msg = `No se pudo hacer ack (${error.message}).`;
-  }
-  opsState.busy = false;
-  if (state.view === 'ops') renderOpsView();
-}
-
-(function mountAdminEntry() {
-  if (!ADMIN_ENABLED) return;
-  const refresh = document.getElementById('refresh-btn');
-  if (!refresh) return;
-  [['admin-identity-entry', 'Identidad', 'identity'], ['admin-ops-entry', 'Operación', 'ops']].forEach(([id, label, view]) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'icon-btn admin-entry';
-    button.id = id;
-    button.textContent = label;
-    button.addEventListener('click', () => openAdminView(view));
-    refresh.before(button);
-  });
-  // Deep link from Telegram alerts: ?admin=1&view=ops
-  if (new URLSearchParams(location.search).get('view') === 'ops') state.view = 'ops';
-})();
-
-
-render();
