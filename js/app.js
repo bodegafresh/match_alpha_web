@@ -1,7 +1,7 @@
 const CFG = window.MATCH_ALPHA_CONFIG || {};
 const API_BASE_URL = String(CFG.API_BASE_URL || '').replace(/\/+$/, '');
 const SEASON = new URLSearchParams(location.search).get('season') || CFG.DEFAULT_SEASON || 'wc2026';
-const KEY_STORAGE = CFG.KEY_STORAGE || 'match_alpha_web_key';
+const KEY_STORAGE = CFG.KEY_STORAGE || 'poolteam2026'; // storage key name kept so saved keys survive; replaced by accounts (SaaS F4)
 const AUTO_REFRESH_MS = Number(CFG.AUTO_REFRESH_MS || 30000);
 const CHILE_TIMEZONE = 'America/Santiago';
 const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || CHILE_TIMEZONE;
@@ -239,10 +239,6 @@ function teamIdentity(team) {
   return team?.identity || {};
 }
 
-function teamFlag(team) {
-  return window.MA_TEAM.flag(team);
-}
-
 function teamMark(team) {
   return window.MA_TEAM.mark(team, teamScope());
 }
@@ -458,7 +454,7 @@ function requestSignal(outerSignal, timeoutMs) {
 }
 
 async function apiGet(path, params = {}, options = {}) {
-  if (!API_BASE_URL || API_BASE_URL.includes('tu-worker')) throw new Error('Configura API_BASE_URL en js/config.js');
+  if (!API_BASE_URL) throw new Error('Configura API_BASE_URL en js/config.js');
   const url = new URL(`${API_BASE_URL}/${path.replace(/^\/+/, '')}`);
   url.searchParams.set('season', SEASON);
   url.searchParams.set('timezone', BROWSER_TIMEZONE);
@@ -720,24 +716,6 @@ function matchCard(match) {
       ${venueDetailHtml(match)}
       ${weatherHtml(match)}
     </article>`;
-}
-
-function todayParams() {
-  const now = new Date();
-  if (state.dateMode === 'yesterday') {
-    const range = chileOperationalRange(now, -1);
-    return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
-  }
-  if (state.dateMode === 'tomorrow') {
-    const range = chileOperationalRange(now, 1);
-    return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
-  }
-  if (state.dateMode === 'upcoming') {
-    const range = chileOperationalRange(now, 1);
-    return { kickoff_from: range.kickoff_from, kickoff_to: chileOperationalRange(now, 30).kickoff_to };
-  }
-  const range = chileOperationalRange(now, 0);
-  return { kickoff_from: range.kickoff_from, kickoff_to: range.kickoff_to };
 }
 
 function matchesOverviewParams() {
@@ -2472,36 +2450,6 @@ const BLOCK_REASON_DESC = {
 
 function quantEmptyState(icon, title, text) {
   return `<div class="quant-empty"><div class="quant-empty__icon">${icon}</div><div class="quant-empty__title">${escapeHtml(title)}</div><div class="quant-empty__text">${escapeHtml(text)}</div></div>`;
-}
-
-function decisionStatusChip(status) {
-  const cfg = {
-    BETTABLE:   ['chip--ok',   'BETTABLE'],
-    PAPER_ONLY: ['chip--warn', 'PAPER'],
-    BLOCKED:    ['chip--muted','BLOQUEADO'],
-    NO_EDGE:    ['chip--muted','SIN EDGE'],
-  };
-  const [cls, label] = cfg[status] || ['chip--muted', escapeHtml(status)];
-  return `<span class="chip ${cls}">${label}</span>`;
-}
-
-function probBars(modelProb, marketProb) {
-  if (modelProb == null && marketProb == null) return '';
-  const mp = Math.round((modelProb ?? 0) * 100);
-  const mkp = Math.round((marketProb ?? 0) * 100);
-  return `
-    <div class="prob-bars">
-      <div class="prob-bar-row">
-        <span class="prob-bar-label">Modelo</span>
-        <div class="prob-bar-track"><div class="prob-bar-fill prob-bar-fill--model" style="width:${mp}%"></div></div>
-        <span class="prob-bar-value">${mp}%</span>
-      </div>
-      <div class="prob-bar-row">
-        <span class="prob-bar-label">Mercado</span>
-        <div class="prob-bar-track"><div class="prob-bar-fill prob-bar-fill--market" style="width:${mkp}%"></div></div>
-        <span class="prob-bar-value">${mkp}%</span>
-      </div>
-    </div>`;
 }
 
 function fmtPct(value) {
@@ -4583,8 +4531,6 @@ async function decideIdentityItem(id, act) {
   }
   if (state.view === 'identity') renderIdentityQueue();
 }
-
-function openIdentityAdmin() { openAdminView('identity'); }
 
 function openAdminView(view) {
   closeMoreSheet();

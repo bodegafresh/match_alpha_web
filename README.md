@@ -1,28 +1,42 @@
-# Match Alpha Web
+# Match Alpha — Web
 
-Frontend estatico para GitHub Pages que consume la API estable del proyecto Pool Team 2026.
+SPA estática (HTML + JavaScript sin frameworks ni build) que consume la API de Match Alpha
+(repo `match_alpha`). Es una PWA con service worker, se publica en GitHub Pages y se adapta a móvil y escritorio.
 
-## Configuracion
-
-Editar `js/config.js`:
+## Configuración (`js/config.js`)
 
 ```js
 window.MATCH_ALPHA_CONFIG = {
-  API_BASE_URL: 'https://matchalpha.bodegafresh.workers.dev/api/v1',
-  DEFAULT_SEASON: 'wc2026',
-  KEY_STORAGE: 'match_alpha_web_key'
+  API_BASE_URL: 'https://match-alpha.onrender.com/api/v1',
+  DEFAULT_SEASON: 'wc2026',      // competición inicial; el usuario la cambia desde el selector
+  KEY_STORAGE: 'poolteam2026',   // nombre en localStorage de la clave de lectura
+  AUTO_REFRESH_MS: 30000
 };
 ```
 
-El frontend usa `Authorization: Bearer <WEB_KEY>` contra el Worker. La clave se guarda solo en `localStorage` del navegador.
+La API se llama con `X-API-Key: <clave de lectura>`, guardada solo en `localStorage`. Aún no hay cuentas de usuario.
 
-## Endpoints usados
+## Estructura
 
-- `GET /api/v1/web/matches`
-- `GET /api/v1/web/standings`
-- `GET /api/v1/web/teams`
-- `GET /api/v1/web/knockout`
+| Archivo | Contenido |
+|---|---|
+| `index.html` | Shell, navegación (pestañas de escritorio, barra inferior y menú "Más" en móvil) |
+| `js/app.js` | Router y vistas: Partidos, Tablas, Equipos, Torneo (llaves y clasificación), ELO, Noticias, Picks (EV+), Modelo, Stats |
+| `js/picks.js` | Historial de picks con ROI/CLV y exportación CSV (`csv.js`) |
+| `js/push.js` | Alertas web push y favoritos |
+| `js/stats-insights.js` | Lógica pura de Stats: estados de muestra, universos de cada métrica |
+| `js/probabilities.js` | Redondeo de probabilidades (cada conjunto 1X2 suma 100%) |
+| `js/team-identity.js` | Escudos, banderas y nombres de equipos |
+| `js/legal.js`, `legal/` | Aviso +18, términos y juego responsable |
+| `sw.js` | Caché offline y stale-while-revalidate de la API |
 
-## Publicacion
+La vista admin (identidad y operación) aparece solo con `?admin=1` y requiere la clave interna.
 
-Este proyecto no requiere build. Se puede publicar directo con GitHub Pages desde la rama configurada.
+## Tests y publicación
+
+```bash
+for t in tests/*.test.js; do node "$t"; done
+```
+
+No hay build. Al cambiar JS o CSS, sube la versión `?v=` en `index.html` y `sw.js` para invalidar la caché.
+Se publica directamente desde la rama `main` en GitHub Pages.
