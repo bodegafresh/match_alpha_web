@@ -4373,6 +4373,20 @@ window.addEventListener('offline', () => setOfflineBanner(true));
   });
 })();
 
+// SaaS feature flags (GET public/config). All OFF while the app stays public and free: nothing of accounts,
+// plans or payments is shown or loaded until the backend turns a flag on (docs/plan_saas_f4_f5.md).
+window.MA_FLAGS = { auth: false, entitlements: false, billing: false, billing_providers: [] };
+function saasEnabled(name) { return Boolean(window.MA_FLAGS && window.MA_FLAGS[name]); }
+// Plain fetch (not apiGet): a missing flag endpoint must never trigger the login screen or status messages.
+fetch(`${API_BASE_URL}/public/config`, { headers: savedKey() ? { 'X-API-Key': savedKey() } : {} })
+  .then((r) => (r.ok ? r.json() : null)).then((json) => json && json.data).then((data) => {
+  if (!data) return;
+  const f = (data && data.flags) || {};
+  window.MA_FLAGS = { auth: f.auth === true, entitlements: f.entitlements === true, billing: f.billing === true,
+    billing_providers: Array.isArray(data && data.billing_providers) ? data.billing_providers : [] };
+  document.dispatchEvent(new CustomEvent('ma:flags', { detail: window.MA_FLAGS }));
+}).catch(() => null); // older backend without the endpoint → everything stays off
+
 // Admin views (identity queue, ops) live in js/admin.js, loaded only with ?admin=1 so the public bundle
 // ships no admin code. admin.js registers window.MA_ADMIN = { isAdminView, render }.
 function isAdminView(view) { return Boolean(window.MA_ADMIN && window.MA_ADMIN.isAdminView(view)); }
